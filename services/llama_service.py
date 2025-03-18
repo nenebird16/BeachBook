@@ -21,7 +21,6 @@ class LlamaService:
 
             # Configure connection for AuraDB
             if uri.scheme == 'neo4j+s':
-                # AuraDB requires bolt+s:// format
                 url = f"bolt+s://{uri.netloc}"
                 self.logger.info("Using AuraDB connection format")
             else:
@@ -62,12 +61,31 @@ class LlamaService:
         """Process a query using the RAG pipeline"""
         try:
             self.logger.info(f"Processing query: {query_text}")
-            # Create query engine from graph store
-            query_engine = self.graph_store.as_query_engine()
+
+            # Create query engine with more specific parameters
+            query_engine = self.graph_store.as_query_engine(
+                response_mode="tree_summarize",
+                verbose=True,
+                similarity_top_k=3  # Retrieve top 3 most relevant nodes
+            )
+
             # Execute query
             response = query_engine.query(query_text)
-            self.logger.info("Successfully processed query")
-            return str(response)
+
+            # Log response metadata
+            self.logger.info("Query processed successfully")
+            self.logger.debug(f"Response source nodes: {len(response.source_nodes)}")
+
+            # Format response with sources
+            formatted_response = str(response)
+            if hasattr(response, 'source_nodes') and response.source_nodes:
+                formatted_response += "\n\nSources:\n"
+                for idx, node in enumerate(response.source_nodes, 1):
+                    formatted_response += f"{idx}. {node.node.text[:200]}...\n"
+
+            return formatted_response
+
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")
+            self.logger.error(f"Query text was: {query_text}")
             raise
