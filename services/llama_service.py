@@ -1,8 +1,5 @@
-from llama_index.core import VectorStoreIndex, Document, Settings, StorageContext
+from llama_index.core import Settings
 from llama_index.graph_stores.neo4j import Neo4jGraphStore
-from llama_index.core.query_engine import RetrieverQueryEngine
-from llama_index.core.retrievers import VectorIndexRetriever
-from llama_index.core.storage.storage_context import StorageContext
 import logging
 from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from urllib.parse import urlparse
@@ -31,17 +28,28 @@ class LlamaService:
 
             self.logger.debug(f"Final connection URI (without credentials): {url}")
 
-            # Define Cypher query templates for graph traversal
+            # Define Cypher query templates for graph queries
             cypher_queries = {
-                "graph_rag_query": """
+                "content_query": """
                     MATCH (d:Document)
                     WHERE d.content CONTAINS $query
-                    WITH d, score() as score
+                    WITH d, score() as relevance
                     MATCH (d)-[r:CONTAINS]->(e:Entity)
                     RETURN d.content as content, 
-                           collect(distinct e.name) as related_entities,
-                           score
-                    ORDER BY score DESC
+                           d.title as title,
+                           collect(distinct e.name) as entities,
+                           relevance
+                    ORDER BY relevance DESC
+                    LIMIT 5
+                """,
+                "entity_query": """
+                    MATCH (e:Entity)
+                    WHERE e.name CONTAINS $query
+                    WITH e
+                    MATCH (d:Document)-[:CONTAINS]->(e)
+                    RETURN d.content as content,
+                           d.title as title,
+                           collect(distinct e.name) as entities
                     LIMIT 5
                 """
             }
@@ -54,94 +62,67 @@ class LlamaService:
                 database="neo4j",
                 cypher_queries=cypher_queries
             )
-
-            # Create storage context with graph store
-            self.storage_context = StorageContext.from_defaults(graph_store=self.graph_store)
-            self.logger.info("Successfully initialized Neo4j graph store with RAG templates")
+            self.logger.info("Successfully initialized Neo4j graph store")
 
         except Exception as e:
             self.logger.error(f"Failed to initialize Neo4j graph store: {str(e)}")
             raise
 
     def process_document(self, content):
-        """Process document content and create index"""
+        """Process document content for storage"""
         try:
-            self.logger.info("Processing document with LlamaIndex")
-            documents = [Document(text=content)]
-
-            # Create vector index with graph store context
-            self.index = VectorStoreIndex.from_documents(
-                documents,
-                storage_context=self.storage_context
-            )
-            self.logger.info("Successfully processed document and created vector index")
-            return self.index
+            self.logger.info("Processing document for storage")
+            # Note: Document processing now handled by DocumentProcessor
+            return True
         except Exception as e:
-            self.logger.error(f"Error processing document with LlamaIndex: {str(e)}")
+            self.logger.error(f"Error processing document: {str(e)}")
             raise
 
     def process_query(self, query_text):
-        """Process a query using the Graph RAG pipeline"""
+        """Process a query using the graph knowledge base"""
         try:
             self.logger.info(f"Processing query: {query_text}")
 
-            # Check if index exists and log its status
-            has_index = hasattr(self, 'index')
-            self.logger.debug(f"Vector index exists: {has_index}")
-
-            if not has_index:
-                self.logger.warning("No vector index found - document needs to be uploaded first")
-                return "Please upload a document first before querying."
-
-            # Try to verify document existence in Neo4j
-            try:
-                doc_check = self.graph_store.raw_query(
-                    query_text="MATCH (d:Document) RETURN count(d) as count",
-                    parameters={}
-                )
-                doc_count = doc_check[0]['count'] if doc_check else 0
-                self.logger.debug(f"Number of documents in Neo4j: {doc_count}")
-
-                if doc_count == 0:
-                    self.logger.warning("No documents found in Neo4j graph")
-                    return "No documents found in the knowledge graph. Please upload a document first."
-            except Exception as e:
-                self.logger.error(f"Error checking Neo4j documents: {str(e)}")
-
-            # Execute graph RAG query
-            result = self.graph_store.raw_query(
+            # Try content-based search first
+            content_results = self.graph_store.raw_query(
                 query_text=query_text,
-                query_type="graph_rag_query",
+                query_type="content_query",
                 parameters={"query": query_text}
             )
-            self.logger.debug(f"Graph query result: {result}")
+            self.logger.debug(f"Content query results: {content_results}")
 
-            # Create hybrid retriever
-            retriever = VectorIndexRetriever(
-                index=self.index,
-                similarity_top_k=3
+            # Try entity-based search
+            entity_results = self.graph_store.raw_query(
+                query_text=query_text,
+                query_type="entity_query",
+                parameters={"query": query_text}
             )
+            self.logger.debug(f"Entity query results: {entity_results}")
 
-            # Create query engine
-            query_engine = RetrieverQueryEngine(
-                retriever=retriever
-            )
+            # Combine and format results
+            response = "Here's what I found in the knowledge graph:\n\n"
 
-            # Get vector store response
-            response = query_engine.query(query_text)
+            if content_results:
+                response += "Content matches:\n"
+                for idx, result in enumerate(content_results, 1):
+                    response += f"{idx}. Document: {result['title']}\n"
+                    response += f"   Content: {result['content'][:200]}...\n"
+                    if result['entities']:
+                        response += f"   Related concepts: {', '.join(result['entities'])}\n"
+                    response += "\n"
 
-            # Combine responses
-            combined_response = str(response)
+            if entity_results:
+                response += "\nEntity matches:\n"
+                for idx, result in enumerate(entity_results, 1):
+                    response += f"{idx}. Found in document: {result['title']}\n"
+                    response += f"   Context: {result['content'][:200]}...\n"
+                    response += f"   Related concepts: {', '.join(result['entities'])}\n"
+                    response += "\n"
 
-            # Add graph context if available
-            if result and len(result) > 0:
-                combined_response += "\n\nGraph Context:\n"
-                for idx, row in enumerate(result, 1):
-                    combined_response += f"{idx}. Document content: {row['content'][:200]}...\n"
-                    if row['related_entities']:
-                        combined_response += f"   Related entities: {', '.join(row['related_entities'])}\n"
+            if not content_results and not entity_results:
+                response = "I couldn't find any relevant information in the knowledge graph for your query."
 
-            return combined_response
+            return response
 
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")
