@@ -1,48 +1,63 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container">
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card">
+<div class="container-fluid">
+    <div class="row">
+        <!-- Left Column: Query Interface -->
+        <div class="col-md-4">
+            <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Upload Document</h5>
+                    <h5 class="card-title mb-0">Query Knowledge Graph CHAT</h5>
                 </div>
-                <div class="card-body">
-                    <form id="uploadForm">
-                        <div class="mb-3">
-                            <input type="file" class="form-control" id="documentFile" name="file" accept=".txt,.doc,.docx,.pdf">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Upload</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">Query Knowledge Graph</h5>
-                </div>
-                <div class="card-body">
-                    <form id="queryForm">
+                <div class="card-body d-flex flex-column">
+                    <div id="chatHistory" class="flex-grow-1 mb-3 overflow-auto"></div>
+                    <form id="queryForm" class="mt-auto">
                         <div class="mb-3">
                             <textarea class="form-control" id="queryText" rows="3" placeholder="Enter your query here..."></textarea>
                         </div>
                         <button type="submit" class="btn btn-primary">Submit Query</button>
                     </form>
-                    <div id="queryResult" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle Column: Cypher Queries -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Generated Cypher Queries</h5>
+                </div>
+                <div class="card-body">
+                    <div id="cypherQueries" class="cypher-query-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Audit Trail -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Audit Trail</h5>
+                </div>
+                <div class="card-body">
+                    <div id="auditTrail" class="audit-trail-container"></div>
                 </div>
             </div>
         </div>
     </div>
-    <div class="row">
+
+    <!-- Document Upload Section at the bottom -->
+    <div class="row mt-4">
         <div class="col-12">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Knowledge Graph Visualization</h5>
+                    <h5 class="card-title mb-0">Upload Document</h5>
                 </div>
                 <div class="card-body">
-                    <div id="graphVisualization"></div>
+                    <form id="uploadForm" class="d-flex gap-3">
+                        <input type="file" class="form-control" id="documentFile" name="file" accept=".txt,.doc,.docx,.pdf">
+                        <button type="submit" class="btn btn-primary">Upload</button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -51,39 +66,24 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/graph_visualization.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize graph visualization
-    updateGraph();
-
-    // Handle document upload
-    document.getElementById('uploadForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const formData = new FormData();
-        formData.append('file', document.getElementById('documentFile').files[0]);
-
-        fetch('/upload', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                throw new Error(data.error);
-            }
-            alert('Document uploaded successfully!');
-            updateGraph();
-        })
-        .catch(error => {
-            alert('Error: ' + error.message);
-        });
-    });
+    // Initialize chat history
+    const chatHistory = document.getElementById('chatHistory');
+    const cypherQueries = document.getElementById('cypherQueries');
+    const auditTrail = document.getElementById('auditTrail');
 
     // Handle query submission
     document.getElementById('queryForm').addEventListener('submit', function(e) {
         e.preventDefault();
         const queryText = document.getElementById('queryText').value;
+
+        // Add user query to chat
+        chatHistory.innerHTML += `
+            <div class="chat-message user-message mb-2">
+                <strong>You:</strong> ${queryText}
+            </div>
+        `;
 
         fetch('/query', {
             method: 'POST',
@@ -97,12 +97,93 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.error) {
                 throw new Error(data.error);
             }
-            const resultDiv = document.getElementById('queryResult');
-            resultDiv.innerHTML = `<div class="alert alert-success">${data.response}</div>`;
+
+            // Parse the response to separate queries and results
+            const responseText = data.response;
+            const queriesMatch = responseText.match(/Queries executed:([\s\S]*?)Results:/);
+            const resultsText = responseText.split('Results:')[1];
+
+            // Display Cypher queries
+            if (queriesMatch && queriesMatch[1]) {
+                cypherQueries.innerHTML = `
+                    <div class="cypher-query">
+                        ${queriesMatch[1].trim()}
+                    </div>
+                `;
+            }
+
+            // Add bot response to chat
+            chatHistory.innerHTML += `
+                <div class="chat-message bot-message mb-2">
+                    <strong>Bot:</strong> ${resultsText || responseText}
+                </div>
+            `;
+
+            // Update audit trail
+            if (data.response.includes('Content matches:') || data.response.includes('Entity matches:')) {
+                const timestamp = new Date().toLocaleTimeString();
+                auditTrail.innerHTML += `
+                    <div class="audit-entry mb-2">
+                        <small class="text-muted">${timestamp}</small>
+                        <div>Query: "${queryText}"</div>
+                        <div>Found matches in knowledge graph</div>
+                    </div>
+                `;
+            }
+
+            // Clear input
+            document.getElementById('queryText').value = '';
+
+            // Scroll chat to bottom
+            chatHistory.scrollTop = chatHistory.scrollHeight;
         })
         .catch(error => {
-            const resultDiv = document.getElementById('queryResult');
-            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+            chatHistory.innerHTML += `
+                <div class="chat-message error-message mb-2">
+                    <strong>Error:</strong> ${error.message}
+                </div>
+            `;
+        });
+    });
+
+    // Handle document upload
+    document.getElementById('uploadForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData();
+        const file = document.getElementById('documentFile').files[0];
+        formData.append('file', file);
+
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+
+            // Add to audit trail
+            const timestamp = new Date().toLocaleTimeString();
+            auditTrail.innerHTML += `
+                <div class="audit-entry mb-2">
+                    <small class="text-muted">${timestamp}</small>
+                    <div>Uploaded: ${file.name}</div>
+                    <div>Status: Success</div>
+                </div>
+            `;
+
+            alert('Document uploaded successfully!');
+        })
+        .catch(error => {
+            auditTrail.innerHTML += `
+                <div class="audit-entry error mb-2">
+                    <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+                    <div>Upload failed: ${file.name}</div>
+                    <div>Error: ${error.message}</div>
+                </div>
+            `;
+            alert('Error: ' + error.message);
         });
     });
 });
