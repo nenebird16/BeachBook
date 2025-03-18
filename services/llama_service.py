@@ -69,21 +69,24 @@ class LlamaService:
                 {context_info}
 
                 Please provide a natural, conversational response that:
-                1. Directly answers the query
+                1. Directly answers the query using the context provided
                 2. Incorporates relevant information from the context
                 3. Highlights key relationships between concepts
                 4. Suggests related areas to explore if relevant
 
                 Response:"""
             else:
-                prompt = f"""As a knowledgeable assistant connected to a graph database, please respond to this query: "{query}"
+                prompt = f"""As a knowledge graph assistant, I need to respond to this query: "{query}"
 
-                Even though I don't find specific matches in the knowledge graph for this query, 
-                I should still provide a helpful and conversational response.
+                Since I don't find any matches in the knowledge graph for this query, I should:
+                1. Politely explain that I can only provide information that exists in the knowledge graph
+                2. Suggest that the user ask about specific topics or documents that might be in the knowledge graph
+                3. Avoid engaging in general conversation or discussing topics not present in the graph
+                4. Keep the response brief and focused
 
-                If this appears to be a greeting or general question, respond naturally.
-                If this is a specific query, explain that while I don't have exact matches,
-                I can help search for related information or suggest how to rephrase the query.
+                For example, if it's a greeting or general chat, respond with something like:
+                "I can help you explore information stored in the knowledge graph. While I don't have information about [their query], 
+                feel free to ask about specific documents or topics in the knowledge base."
 
                 Response:"""
 
@@ -94,7 +97,7 @@ class LlamaService:
                 messages=[
                     {
                         "role": "assistant",
-                        "content": "I am a knowledgeable assistant helping to analyze and explain information from a knowledge graph. I'll be concise but informative."
+                        "content": "I am a knowledge graph assistant that only provides information from the connected graph database. I stay focused on available content and politely decline general conversation."
                     },
                     {
                         "role": "user",
