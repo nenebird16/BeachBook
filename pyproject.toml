@@ -15,4 +15,5 @@ dependencies = [
     "py2neo>=2021.2.4",
     "llama-index-core>=0.12.24.post1",
     "anthropic>=0.49.0",
+    "spacy>=3.8.4",
 ]
