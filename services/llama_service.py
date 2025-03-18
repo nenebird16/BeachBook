@@ -5,6 +5,7 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from urllib.parse import urlparse
 from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
+import json
 
 class LlamaService:
     def __init__(self):
@@ -142,14 +143,6 @@ class LlamaService:
             entity_results = self.graph.run(entity_query, query=query_text).data()
             self.logger.debug(f"Entity query results: {entity_results}")
 
-            # Format response
-            response = "Here's what I found in the knowledge graph:\n\n"
-
-            # Add queries used (for debugging)
-            response += "Queries executed:\n"
-            response += "1. Content Query:\n```cypher\n" + content_query + "\n```\n\n"
-            response += "2. Entity Query:\n```cypher\n" + entity_query + "\n```\n\n"
-
             # Prepare context for AI response if we have matches
             context_info = None
             if content_results or entity_results:
@@ -176,12 +169,15 @@ class LlamaService:
             # Generate AI response (with or without context)
             ai_response = self.generate_response(query_text, context_info)
 
-            if ai_response:
-                response += "Claude's Response:\n" + ai_response + "\n\n"
-                if context_info:
-                    response += "Raw Results:\n" + context_info
-
-            return response
+            # Return structured response
+            return {
+                'chat_response': ai_response,
+                'queries': {
+                    'content_query': content_query,
+                    'entity_query': entity_query
+                },
+                'results': context_info if context_info else "No matches found in knowledge graph"
+            }
 
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")

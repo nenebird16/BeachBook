@@ -65,7 +65,13 @@ def query_knowledge():
 
         # Process query through RAG pipeline
         response = llama_service.process_query(query)
-        return jsonify({'response': response})
+        return jsonify({
+            'response': response['chat_response'],
+            'technical_details': {
+                'queries': response['queries'],
+                'results': response['results']
+            }
+        })
 
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
