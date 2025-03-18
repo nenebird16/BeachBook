@@ -7,6 +7,8 @@ from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
 from services.semantic_processor import SemanticProcessor
 import json
+from services.query_templates import QueryTemplates
+from typing import Dict
 
 class LlamaService:
     def __init__(self):
@@ -18,6 +20,7 @@ class LlamaService:
 
         # Initialize semantic processor
         self.semantic_processor = SemanticProcessor()
+        self.query_templates = QueryTemplates()
 
         try:
             if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
@@ -348,4 +351,25 @@ class LlamaService:
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")
             self.logger.error(f"Query text was: {query_text}")
+            raise
+
+    def get_available_queries(self):
+        """Get information about available query templates"""
+        return self.query_templates.list_available_queries()
+
+    def execute_template_query(self, category: str, query_name: str, params: Dict = None):
+        """Execute a template query with parameters"""
+        try:
+            query = self.query_templates.get_query(category, query_name)
+            if not query:
+                raise ValueError(f"Query template not found: {category}/{query_name}")
+
+            if params is None:
+                params = {}
+
+            results = self.graph.run(query, **params).data()
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Error executing template query: {str(e)}")
             raise
