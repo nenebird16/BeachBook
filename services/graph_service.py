@@ -1,6 +1,6 @@
 from py2neo import Graph, Node, Relationship
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
 class GraphService:
@@ -9,13 +9,22 @@ class GraphService:
         try:
             # Parse the URI and convert neo4j protocol to bolt
             uri = urlparse(NEO4J_URI)
-            if uri.scheme.startswith('neo4j'):
-                # Convert neo4j:// to bolt:// or neo4j+s:// to bolt+s://
-                bolt_uri = NEO4J_URI.replace('neo4j', 'bolt', 1)
+            if uri.scheme == 'neo4j+s':
+                # For neo4j+s://, use bolt+s://
+                scheme = 'bolt+s'
+                bolt_uri = urlunparse((scheme, uri.netloc, uri.path, uri.params, uri.query, uri.fragment))
                 self.logger.info(f"Converting Neo4j URI from {NEO4J_URI} to {bolt_uri}")
-                self.graph = Graph(bolt_uri, auth=(NEO4J_USER, NEO4J_PASSWORD))
+            elif uri.scheme == 'neo4j':
+                # For neo4j://, use bolt://
+                scheme = 'bolt'
+                bolt_uri = urlunparse((scheme, uri.netloc, uri.path, uri.params, uri.query, uri.fragment))
+                self.logger.info(f"Converting Neo4j URI from {NEO4J_URI} to {bolt_uri}")
             else:
-                self.graph = Graph(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+                bolt_uri = NEO4J_URI
+                self.logger.info(f"Using original URI: {bolt_uri}")
+
+            self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USER}")
+            self.graph = Graph(bolt_uri, auth=(NEO4J_USER, NEO4J_PASSWORD))
             self.logger.info("Successfully connected to Neo4j database")
         except Exception as e:
             self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
