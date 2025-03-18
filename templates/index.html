@@ -68,22 +68,28 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize chat history
+    // Initialize panels
     const chatHistory = document.getElementById('chatHistory');
     const cypherQueries = document.getElementById('cypherQueries');
     const auditTrail = document.getElementById('auditTrail');
+
+    // Function to scroll a container to bottom with smooth animation
+    function scrollToBottom(container) {
+        container.scrollTop = container.scrollHeight;
+    }
 
     // Handle query submission
     document.getElementById('queryForm').addEventListener('submit', function(e) {
         e.preventDefault();
         const queryText = document.getElementById('queryText').value;
 
-        // Add user query to chat
+        // Add user query to chat with smooth scroll
         chatHistory.innerHTML += `
             <div class="chat-message user-message mb-2">
                 <strong>You:</strong> ${queryText}
             </div>
         `;
+        scrollToBottom(chatHistory);
 
         fetch('/query', {
             method: 'POST',
@@ -104,9 +110,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     <strong>Bot:</strong> ${data.response}
                 </div>
             `;
+            scrollToBottom(chatHistory);
 
-            // Display Cypher queries in middle panel
-            cypherQueries.innerHTML = `
+            // Display Cypher queries
+            cypherQueries.innerHTML += `
                 <div class="cypher-query mb-3">
                     <h6>Content Query:</h6>
                     <pre><code>${data.technical_details.queries.content_query}</code></pre>
@@ -116,6 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <pre><code>${data.technical_details.queries.entity_query}</code></pre>
                 </div>
             `;
+            scrollToBottom(cypherQueries);
 
             // Update audit trail
             const hasMatches = data.technical_details.results !== "No matches found in knowledge graph";
@@ -127,12 +135,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div>${hasMatches ? 'Found matches in knowledge graph' : 'Conversational response (no matches)'}</div>
                 </div>
             `;
+            scrollToBottom(auditTrail);
 
             // Clear input
             document.getElementById('queryText').value = '';
-
-            // Scroll chat to bottom
-            chatHistory.scrollTop = chatHistory.scrollHeight;
         })
         .catch(error => {
             chatHistory.innerHTML += `
@@ -140,6 +146,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <strong>Error:</strong> ${error.message}
                 </div>
             `;
+            scrollToBottom(chatHistory);
         });
     });
 
@@ -160,7 +167,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(data.error);
             }
 
-            // Add to audit trail
+            // Add to audit trail with smooth scroll
             const timestamp = new Date().toLocaleTimeString();
             auditTrail.innerHTML += `
                 <div class="audit-entry mb-2">
@@ -169,6 +176,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div>Status: Success</div>
                 </div>
             `;
+            scrollToBottom(auditTrail);
 
             alert('Document uploaded successfully!');
         })
@@ -180,6 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div>Error: ${error.message}</div>
                 </div>
             `;
+            scrollToBottom(auditTrail);
             alert('Error: ' + error.message);
         });
     });
