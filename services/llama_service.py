@@ -126,19 +126,42 @@ class LlamaService:
 
                 Response:"""
             else:
-                prompt = f"""As a knowledge graph assistant, I need to respond to this query: "{query}"
+                # Check if this is a query about graph contents
+                is_content_query = any(keyword in query.lower() 
+                                     for keyword in ['what', 'tell me about', 'show me', 'list', 'topics'])
 
-                Since I don't find any matches in the knowledge graph for this query, I should:
-                1. Politely explain that I can only provide information that exists in the knowledge graph
-                2. Suggest that the user ask about specific topics or documents that might be in the knowledge graph
-                3. Avoid engaging in general conversation or discussing topics not present in the graph
-                4. Keep the response brief and focused
+                if is_content_query:
+                    # Get graph overview
+                    overview = self._get_graph_overview()
+                    if overview:
+                        prompt = f"""As a knowledge graph assistant, I need to respond to this query: "{query}"
 
-                For example, if it's a greeting or general chat, respond with something like:
-                "I can help you explore information stored in the knowledge graph. While I don't have information about [their query], 
-                feel free to ask about specific documents or topics in the knowledge base."
+                        Here's what I found in the knowledge graph:
+                        {overview}
 
-                Response:"""
+                        Please provide a helpful response that:
+                        1. Summarizes the types of information available
+                        2. Lists some key topics or entities found
+                        3. Encourages exploring specific areas of interest
+                        4. Maintains a focus on actual graph contents
+
+                        Response:"""
+                    else:
+                        prompt = """The knowledge graph appears to be empty at the moment. Please explain that:
+                        1. No documents or entities have been added yet
+                        2. Documents need to be uploaded first
+                        3. Keep the response brief and clear
+                        """
+                else:
+                    prompt = f"""As a knowledge graph assistant, I need to respond to this query: "{query}"
+
+                    Since I don't find any matches in the knowledge graph for this query, I should:
+                    1. Politely explain that I can only provide information that exists in the knowledge graph
+                    2. Suggest that the user ask about specific topics or documents that might be in the knowledge graph
+                    3. Avoid engaging in general conversation or discussing topics not present in the graph
+                    4. Keep the response brief and focused
+
+                    Response:"""
 
             response = self.anthropic.messages.create(
                 model="claude-3-opus-20240229",
@@ -160,6 +183,53 @@ class LlamaService:
 
         except Exception as e:
             self.logger.error(f"Error generating Claude response: {str(e)}")
+            return None
+
+    def _get_graph_overview(self):
+        """Get an overview of entities and topics in the graph"""
+        try:
+            # Query to get entity types and counts
+            entity_query = """
+            MATCH (e:Entity)
+            WITH e.type as type, collect(distinct e.name) as entities
+            RETURN type, entities
+            ORDER BY size(entities) DESC
+            LIMIT 5
+            """
+            entity_results = self.graph.run(entity_query).data()
+
+            # Query to get document counts and titles
+            doc_query = """
+            MATCH (d:Document)
+            RETURN count(d) as doc_count,
+                   collect(distinct d.title)[..5] as sample_titles
+            """
+            doc_results = self.graph.run(doc_query).data()
+
+            if not entity_results and not doc_results[0]['doc_count']:
+                return None
+
+            # Format overview
+            overview = []
+            if doc_results[0]['doc_count']:
+                overview.append(f"Documents: {doc_results[0]['doc_count']} total")
+                if doc_results[0]['sample_titles']:
+                    overview.append("Sample documents:")
+                    for title in doc_results[0]['sample_titles']:
+                        overview.append(f"- {title}")
+                    overview.append("")
+
+            if entity_results:
+                overview.append("Entity types and examples:")
+                for result in entity_results:
+                    entity_type = result['type'] or 'general'
+                    entities = result['entities'][:5]  # Limit to 5 examples
+                    overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
+
+            return "\n".join(overview)
+
+        except Exception as e:
+            self.logger.error(f"Error getting graph overview: {str(e)}")
             return None
 
     def process_query(self, query_text):
