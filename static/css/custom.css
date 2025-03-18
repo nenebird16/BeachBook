@@ -17,10 +17,22 @@
 }
 
 #queryResult {
-    max-height: 300px;
+    max-height: 500px;
     overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: monospace;
 }
 
 .alert {
     word-wrap: break-word;
+}
+
+.cypher-query {
+    background-color: rgba(0, 0, 0, 0.2);
+    padding: 1rem;
+    border-radius: 4px;
+    margin: 0.5rem 0;
+    font-family: monospace;
+    white-space: pre;
+    overflow-x: auto;
 }

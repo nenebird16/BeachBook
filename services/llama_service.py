@@ -97,8 +97,14 @@ class LlamaService:
             entity_results = self.graph.run(entity_query, query=query_text).data()
             self.logger.debug(f"Entity query results: {entity_results}")
 
-            # Format response
+            # Start building response
             response = "Here's what I found in the knowledge graph:\n\n"
+
+            # Add queries used (for debugging)
+            response += "Queries executed:\n"
+            response += "1. Content Query:\n```cypher\n" + content_query + "\n```\n\n"
+            response += "2. Entity Query:\n```cypher\n" + entity_query + "\n```\n\n"
+            response += "Results:\n"
 
             if content_results:
                 response += "Content matches:\n"
@@ -118,7 +124,10 @@ class LlamaService:
                     response += "\n"
 
             if not content_results and not entity_results:
-                response = "I couldn't find any relevant information in the knowledge graph for your query."
+                response = "I couldn't find any relevant information in the knowledge graph for your query.\n\n"
+                response += "Queries attempted:\n"
+                response += "1. Content Query:\n```cypher\n" + content_query + "\n```\n\n"
+                response += "2. Entity Query:\n```cypher\n" + entity_query + "\n```\n"
 
             return response
 
