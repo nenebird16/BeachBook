@@ -1,6 +1,9 @@
-from py2neo import Graph, Node, Relationship
-import logging
 import os
+# Remove NEO4J_URI from environment before importing py2neo
+original_uri = os.environ.pop('NEO4J_URI', None)
+
+from py2neo import Graph, Node, Relationship, ConnectionProfile
+import logging
 from urllib.parse import urlparse
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
@@ -17,24 +20,32 @@ class GraphService:
             self.logger.debug(f"Original URI netloc: {uri.netloc}")
 
             try:
-                # Configure connection for AuraDB
+                # Create connection profile
                 if uri.scheme == 'neo4j+s':
                     # AuraDB connection settings
-                    self.graph = Graph(
+                    profile = ConnectionProfile(
                         scheme="bolt+s",
                         host=uri.netloc,
-                        auth=(NEO4J_USER, NEO4J_PASSWORD)
+                        port=7687,  # Default AuraDB port
+                        secure=True,
+                        user=NEO4J_USER,
+                        password=NEO4J_PASSWORD
                     )
                     self.logger.info("Using AuraDB connection format")
                 else:
-                    # Standard Neo4j connection
-                    self.graph = Graph(
-                        NEO4J_URI,
-                        auth=(NEO4J_USER, NEO4J_PASSWORD)
+                    profile = ConnectionProfile(
+                        uri=NEO4J_URI,
+                        user=NEO4J_USER,
+                        password=NEO4J_PASSWORD
                     )
                     self.logger.info("Using standard Neo4j connection format")
 
-                # Test the connection
+                self.logger.debug(f"Connection profile configured: {profile.scheme}://{profile.host}")
+
+                # Initialize Graph with the connection profile
+                self.graph = Graph(profile=profile)
+
+                # Verify connection
                 result = self.graph.run("RETURN 1 as test").data()
                 self.logger.info("Successfully connected to Neo4j database")
                 self.logger.debug(f"Test query result: {result}")
