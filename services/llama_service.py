@@ -3,13 +3,13 @@ from llama_index.graph_stores.neo4j import Neo4jGraphStore
 import logging
 from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from urllib.parse import urlparse
+from py2neo import Graph, ConnectionProfile
 
 class LlamaService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         Settings.llm_api_key = OPENAI_API_KEY
 
-        # Initialize Neo4j graph store
         try:
             if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
                 raise ValueError("Neo4j credentials not properly configured")
@@ -28,44 +28,29 @@ class LlamaService:
 
             self.logger.debug(f"Final connection URI (without credentials): {url}")
 
-            # Define Cypher query templates for graph queries
-            cypher_queries = {
-                "content_query": """
-                    MATCH (d:Document)
-                    WHERE d.content CONTAINS $query
-                    WITH d, score() as relevance
-                    MATCH (d)-[r:CONTAINS]->(e:Entity)
-                    RETURN d.content as content, 
-                           d.title as title,
-                           collect(distinct e.name) as entities,
-                           relevance
-                    ORDER BY relevance DESC
-                    LIMIT 5
-                """,
-                "entity_query": """
-                    MATCH (e:Entity)
-                    WHERE e.name CONTAINS $query
-                    WITH e
-                    MATCH (d:Document)-[:CONTAINS]->(e)
-                    RETURN d.content as content,
-                           d.title as title,
-                           collect(distinct e.name) as entities
-                    LIMIT 5
-                """
-            }
+            # Initialize direct Neo4j connection for queries
+            profile = ConnectionProfile(
+                scheme="bolt+s" if uri.scheme == 'neo4j+s' else uri.scheme,
+                host=uri.netloc,
+                port=7687,
+                secure=True if uri.scheme == 'neo4j+s' else False,
+                user=NEO4J_USER,
+                password=NEO4J_PASSWORD
+            )
+            self.graph = Graph(profile=profile)
+            self.logger.info("Successfully connected to Neo4j database")
 
-            # Initialize graph store with query templates
+            # Initialize LlamaIndex graph store for document processing
             self.graph_store = Neo4jGraphStore(
                 username=NEO4J_USER,
                 password=NEO4J_PASSWORD,
                 url=url,
-                database="neo4j",
-                cypher_queries=cypher_queries
+                database="neo4j"
             )
             self.logger.info("Successfully initialized Neo4j graph store")
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize Neo4j graph store: {str(e)}")
+            self.logger.error(f"Failed to initialize Neo4j connections: {str(e)}")
             raise
 
     def process_document(self, content):
@@ -83,23 +68,37 @@ class LlamaService:
         try:
             self.logger.info(f"Processing query: {query_text}")
 
-            # Try content-based search first
-            content_results = self.graph_store.raw_query(
-                query_text=query_text,
-                query_type="content_query",
-                parameters={"query": query_text}
-            )
+            # Content-based search
+            content_query = """
+                MATCH (d:Document)
+                WHERE d.content CONTAINS $query
+                WITH d, score() as relevance
+                MATCH (d)-[r:CONTAINS]->(e:Entity)
+                RETURN d.content as content, 
+                       d.title as title,
+                       collect(distinct e.name) as entities,
+                       relevance
+                ORDER BY relevance DESC
+                LIMIT 5
+            """
+            content_results = self.graph.run(content_query, query=query_text).data()
             self.logger.debug(f"Content query results: {content_results}")
 
-            # Try entity-based search
-            entity_results = self.graph_store.raw_query(
-                query_text=query_text,
-                query_type="entity_query",
-                parameters={"query": query_text}
-            )
+            # Entity-based search
+            entity_query = """
+                MATCH (e:Entity)
+                WHERE e.name CONTAINS $query
+                WITH e
+                MATCH (d:Document)-[:CONTAINS]->(e)
+                RETURN d.content as content,
+                       d.title as title,
+                       collect(distinct e.name) as entities
+                LIMIT 5
+            """
+            entity_results = self.graph.run(entity_query, query=query_text).data()
             self.logger.debug(f"Entity query results: {entity_results}")
 
-            # Combine and format results
+            # Format response
             response = "Here's what I found in the knowledge graph:\n\n"
 
             if content_results:
