@@ -2,7 +2,7 @@ from llama_index.core import VectorStoreIndex, Document, Settings, StorageContex
 from llama_index.graph_stores.neo4j import Neo4jGraphStore
 import logging
 from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 class LlamaService:
     def __init__(self):
@@ -14,22 +14,21 @@ class LlamaService:
             if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
                 raise ValueError("Neo4j credentials not properly configured")
 
-            # Parse and convert the URI for AuraDB connection
+            # Parse the URI and extract hostname for AuraDB
             uri = urlparse(NEO4J_URI)
             self.logger.debug(f"Original URI scheme: {uri.scheme}")
             self.logger.debug(f"Original URI netloc: {uri.netloc}")
 
-            # Convert neo4j+s to bolt+s for AuraDB
+            # For AuraDB, construct the bolt URL directly
             if uri.scheme == 'neo4j+s':
-                # Reconstruct the URI with bolt+s scheme
-                bolt_uri = urlunparse(('bolt+s', uri.netloc, '', '', '', ''))
-            elif uri.scheme == 'neo4j':
-                # Standard Neo4j
-                bolt_uri = urlunparse(('bolt', uri.netloc, '', '', '', ''))
+                # AuraDB requires bolt+s:// format
+                bolt_uri = f"bolt+s://{uri.netloc}"
+                self.logger.info("Using AuraDB connection format")
             else:
                 bolt_uri = NEO4J_URI
+                self.logger.info("Using standard Neo4j connection format")
 
-            self.logger.info(f"Converted URI scheme: {urlparse(bolt_uri).scheme}")
+            self.logger.debug(f"Final connection URI (without credentials): {bolt_uri}")
             self.logger.debug(f"Attempting to connect with user: {NEO4J_USER}")
 
             self.graph_store = Neo4jGraphStore(

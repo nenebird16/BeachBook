@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def test_connections():
     # Get credentials from environment
     neo4j_uri = os.environ.get("NEO4J_URI")
-    neo4j_user = os.environ.get("NEO4J_USER")
+    neo4j_user = os.environ.get("NEO4J_USER")  # Using NEO4J_USER consistently
     neo4j_password = os.environ.get("NEO4J_PASSWORD")
     openai_key = os.environ.get("OPENAI_API_KEY")
 
@@ -31,25 +31,40 @@ def test_connections():
         # Parse URI for AuraDB connection
         uri = urlparse(neo4j_uri)
         logger.debug(f"Original URI scheme: {uri.scheme}")
+        logger.debug(f"Original URI netloc: {uri.netloc}")
 
-        # Handle AuraDB URI conversion
+        # For AuraDB, construct the bolt URL directly
         if uri.scheme == 'neo4j+s':
             bolt_uri = f"bolt+s://{uri.netloc}"
-        elif uri.scheme == 'neo4j':
-            bolt_uri = f"bolt://{uri.netloc}"
+            logger.info("Using AuraDB connection format")
         else:
             bolt_uri = neo4j_uri
+            logger.info("Using standard Neo4j connection format")
 
-        logger.info(f"Using connection URI with scheme: {urlparse(bolt_uri).scheme}")
+        logger.debug(f"Final connection URI (without credentials): {bolt_uri}")
 
         # Test direct Neo4j connection
         logger.info("Testing direct Neo4j connection...")
         try:
-            graph = Graph(bolt_uri, auth=(neo4j_user, neo4j_password))
+            # Temporarily remove NEO4J_URI from environment
+            original_uri = os.environ.pop('NEO4J_URI', None)
+
+            graph = Graph(
+                bolt_uri,
+                auth=(neo4j_user, neo4j_password)
+            )
+
+            # Restore original URI if it existed
+            if original_uri:
+                os.environ['NEO4J_URI'] = original_uri
+
             result = graph.run("RETURN 1 as test").data()
             logger.info("✓ Direct Neo4j connection successful")
             logger.debug(f"Test query result: {result}")
         except Exception as e:
+            # Restore original URI in case of error
+            if original_uri:
+                os.environ['NEO4J_URI'] = original_uri
             logger.error(f"Failed to connect to Neo4j: {str(e)}")
             raise
 

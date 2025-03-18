@@ -1,6 +1,7 @@
 from py2neo import Graph, Node, Relationship
 import logging
-from urllib.parse import urlparse, urlunparse
+import os
+from urllib.parse import urlparse
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
 class GraphService:
@@ -10,36 +11,38 @@ class GraphService:
             if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
                 raise ValueError("Neo4j credentials not properly configured")
 
-            # Parse and convert the URI for AuraDB connection
+            # Parse the URI and extract hostname for AuraDB
             uri = urlparse(NEO4J_URI)
             self.logger.debug(f"Original URI scheme: {uri.scheme}")
             self.logger.debug(f"Original URI netloc: {uri.netloc}")
 
-            # Convert neo4j+s to bolt+s for AuraDB
-            if uri.scheme == 'neo4j+s':
-                # Reconstruct the URI with bolt+s scheme
-                bolt_uri = urlunparse(('bolt+s', uri.netloc, '', '', '', ''))
-            elif uri.scheme == 'neo4j':
-                # Standard Neo4j
-                bolt_uri = urlunparse(('bolt', uri.netloc, '', '', '', ''))
-            else:
-                bolt_uri = NEO4J_URI
-
-            self.logger.info(f"Converted URI scheme: {urlparse(bolt_uri).scheme}")
-            self.logger.debug(f"Attempting to connect with user: {NEO4J_USER}")
-
             try:
-                self.graph = Graph(
-                    bolt_uri,
-                    auth=(NEO4J_USER, NEO4J_PASSWORD)
-                )
+                # Configure connection for AuraDB
+                if uri.scheme == 'neo4j+s':
+                    # AuraDB connection settings
+                    self.graph = Graph(
+                        scheme="bolt+s",
+                        host=uri.netloc,
+                        auth=(NEO4J_USER, NEO4J_PASSWORD)
+                    )
+                    self.logger.info("Using AuraDB connection format")
+                else:
+                    # Standard Neo4j connection
+                    self.graph = Graph(
+                        NEO4J_URI,
+                        auth=(NEO4J_USER, NEO4J_PASSWORD)
+                    )
+                    self.logger.info("Using standard Neo4j connection format")
+
                 # Test the connection
                 result = self.graph.run("RETURN 1 as test").data()
                 self.logger.info("Successfully connected to Neo4j database")
                 self.logger.debug(f"Test query result: {result}")
+
             except Exception as e:
                 self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
                 raise
+
         except Exception as e:
             self.logger.error(f"Failed to initialize GraphService: {str(e)}")
             raise
