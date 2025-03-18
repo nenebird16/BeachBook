@@ -71,13 +71,12 @@ class LlamaService:
             # Content-based search
             content_query = """
                 MATCH (d:Document)
-                WHERE d.content CONTAINS $query
-                WITH d, score() as relevance
+                WHERE toLower(d.content) CONTAINS toLower($query)
                 MATCH (d)-[r:CONTAINS]->(e:Entity)
                 RETURN d.content as content, 
                        d.title as title,
                        collect(distinct e.name) as entities,
-                       relevance
+                       count(e) as relevance
                 ORDER BY relevance DESC
                 LIMIT 5
             """
@@ -87,7 +86,7 @@ class LlamaService:
             # Entity-based search
             entity_query = """
                 MATCH (e:Entity)
-                WHERE e.name CONTAINS $query
+                WHERE toLower(e.name) CONTAINS toLower($query)
                 WITH e
                 MATCH (d:Document)-[:CONTAINS]->(e)
                 RETURN d.content as content,
