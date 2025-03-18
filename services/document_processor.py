@@ -10,24 +10,42 @@ class DocumentProcessor:
     def process_document(self, file):
         """Process uploaded document and store in knowledge graph"""
         try:
-            content = file.read().decode('utf-8')
-            
             # Create document info
             doc_info = {
                 'title': file.filename,
-                'content': content,
                 'timestamp': datetime.now().isoformat()
             }
 
+            # Handle different file types
+            file_content = None
+            if file.filename.endswith('.txt'):
+                # For text files, decode as UTF-8
+                file_content = file.read().decode('utf-8')
+            elif file.filename.endswith(('.pdf', '.doc', '.docx')):
+                # For binary files, read as bytes
+                file_content = file.read()
+                # TODO: Add proper binary file processing here
+                # For now, return an informative error
+                raise NotImplementedError(
+                    "Binary file processing is not yet implemented. "
+                    "Currently supported formats: .txt"
+                )
+            else:
+                raise ValueError(
+                    "Unsupported file type. "
+                    "Currently supported formats: .txt"
+                )
+
+            doc_info['content'] = file_content
+
             # Process with LlamaIndex
-            self.llama_service.process_document(content)
+            self.llama_service.process_document(file_content)
 
             # Create document node in Neo4j
             doc_node = self.graph_service.create_document_node(doc_info)
 
             # Extract and create entity relationships
-            # This is a simplified version - in practice, you'd use NLP for entity extraction
-            self.create_basic_entities(doc_node, content)
+            self.create_basic_entities(doc_node, file_content)
 
             return doc_info
 
@@ -38,7 +56,6 @@ class DocumentProcessor:
     def create_basic_entities(self, doc_node, content):
         """Create basic entities from document content"""
         # This is a simplified implementation
-        # In practice, you'd use NLP tools for proper entity extraction
         words = content.split()
         for word in set(words):
             if len(word) > 5:  # Simple filter for demonstration
