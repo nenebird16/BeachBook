@@ -1,7 +1,7 @@
 from py2neo import Graph, Node, Relationship
 import logging
-from urllib.parse import urlparse, urlunparse
-from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+from urllib.parse import urlparse
+from config import NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD # Changed NEO4J_USER to NEO4J_USERNAME
 
 class GraphService:
     def __init__(self):
@@ -18,8 +18,8 @@ class GraphService:
                 bolt_uri = NEO4J_URI
                 self.logger.info(f"Using standard connection with URI: {bolt_uri}")
 
-            self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USER}")
-            self.graph = Graph(bolt_uri, auth=(NEO4J_USER, NEO4J_PASSWORD))
+            self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USERNAME}") # Changed NEO4J_USER to NEO4J_USERNAME
+            self.graph = Graph(bolt_uri, auth=(NEO4J_USERNAME, NEO4J_PASSWORD)) # Changed NEO4J_USER to NEO4J_USERNAME
             self.logger.info("Successfully connected to Neo4j database")
         except Exception as e:
             self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
