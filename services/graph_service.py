@@ -7,21 +7,16 @@ class GraphService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         try:
-            # Parse the URI and convert neo4j protocol to bolt
+            # Parse the URI
             uri = urlparse(NEO4J_URI)
             if uri.scheme == 'neo4j+s':
-                # For neo4j+s://, use bolt+s://
-                scheme = 'bolt+s'
-                bolt_uri = urlunparse((scheme, uri.netloc, uri.path, uri.params, uri.query, uri.fragment))
-                self.logger.info(f"Converting Neo4j URI from {NEO4J_URI} to {bolt_uri}")
-            elif uri.scheme == 'neo4j':
-                # For neo4j://, use bolt://
-                scheme = 'bolt'
-                bolt_uri = urlunparse((scheme, uri.netloc, uri.path, uri.params, uri.query, uri.fragment))
-                self.logger.info(f"Converting Neo4j URI from {NEO4J_URI} to {bolt_uri}")
+                # For AuraDB, use bolt+s://
+                netloc = uri.netloc
+                bolt_uri = f"bolt+s://{netloc}"
+                self.logger.info(f"Using AuraDB connection with URI: {bolt_uri}")
             else:
                 bolt_uri = NEO4J_URI
-                self.logger.info(f"Using original URI: {bolt_uri}")
+                self.logger.info(f"Using standard connection with URI: {bolt_uri}")
 
             self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USER}")
             self.graph = Graph(bolt_uri, auth=(NEO4J_USER, NEO4J_PASSWORD))

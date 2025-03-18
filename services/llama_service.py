@@ -2,6 +2,7 @@ from llama_index.core import VectorStoreIndex, Document, Settings, StorageContex
 from llama_index.graph_stores.neo4j import Neo4jGraphStore
 import logging
 from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+from urllib.parse import urlparse
 
 class LlamaService:
     def __init__(self):
@@ -10,10 +11,21 @@ class LlamaService:
 
         # Initialize Neo4j graph store
         try:
+            # Parse the URI
+            uri = urlparse(NEO4J_URI)
+            if uri.scheme == 'neo4j+s':
+                # For AuraDB, use bolt+s://
+                netloc = uri.netloc
+                bolt_uri = f"bolt+s://{netloc}"
+                self.logger.info(f"Using AuraDB connection with URI: {bolt_uri}")
+            else:
+                bolt_uri = NEO4J_URI
+                self.logger.info(f"Using standard connection with URI: {bolt_uri}")
+
             self.graph_store = Neo4jGraphStore(
                 username=NEO4J_USER,
                 password=NEO4J_PASSWORD,
-                url=NEO4J_URI,
+                url=bolt_uri,
                 database="neo4j"
             )
             self.storage_context = StorageContext.from_defaults(graph_store=self.graph_store)
