@@ -1,7 +1,7 @@
 from llama_index.core import VectorStoreIndex, Document, Settings, StorageContext
 from llama_index.graph_stores.neo4j import Neo4jGraphStore
 import logging
-from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD  # Changed NEO4J_USER to NEO4J_USERNAME
+from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
 from urllib.parse import urlparse
 
 class LlamaService:
@@ -24,7 +24,7 @@ class LlamaService:
 
             self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USERNAME}")
             self.graph_store = Neo4jGraphStore(
-                username=NEO4J_USERNAME,  # Changed from NEO4J_USER
+                username=NEO4J_USERNAME,
                 password=NEO4J_PASSWORD,
                 url=bolt_uri,
                 database="neo4j"

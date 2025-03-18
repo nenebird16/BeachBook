@@ -1,22 +1,30 @@
 from py2neo import Graph, Node, Relationship
 import logging
 from urllib.parse import urlparse
-from config import NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD # Changed NEO4J_USER to NEO4J_USERNAME
+from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
 class GraphService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         try:
-            if not NEO4J_URI or not NEO4J_USERNAME or not NEO4J_PASSWORD:
+            if not NEO4J_URI or not NEO4J_USER or not NEO4J_PASSWORD:
                 raise ValueError("Neo4j credentials not properly configured. Check environment variables.")
 
+            # Parse the URI for AuraDB connection
             uri = urlparse(NEO4J_URI)
-            self.logger.info(f"Connecting to Neo4j at: {NEO4J_URI}")
-            self.logger.debug(f"Attempting to connect with user: {NEO4J_USERNAME}")
+            if uri.scheme == 'neo4j+s':
+                # For AuraDB, use bolt+s://
+                netloc = uri.netloc
+                bolt_uri = f"bolt+s://{netloc}"
+                self.logger.info(f"Using AuraDB connection with URI: {bolt_uri}")
+            else:
+                bolt_uri = NEO4J_URI
+                self.logger.info(f"Using standard connection with URI: {bolt_uri}")
 
+            self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USER}")
             self.graph = Graph(
-                NEO4J_URI,
-                auth=(NEO4J_USERNAME, NEO4J_PASSWORD),
+                bolt_uri,
+                auth=(NEO4J_USER, NEO4J_PASSWORD),
                 name="neo4j"
             )
             self.logger.info("Successfully connected to Neo4j database")

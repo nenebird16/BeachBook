@@ -6,12 +6,12 @@ logger = logging.getLogger(__name__)
 
 # Neo4j Configuration
 NEO4J_URI = os.environ.get("NEO4J_URI")
-NEO4J_USERNAME = os.environ.get("NEO4J_USERNAME")  # Changed from NEO4J_USER
+NEO4J_USER = os.environ.get("NEO4J_USER")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
 
 # Log configuration status (without exposing sensitive values)
 logger.debug(f"Neo4j URI configured: {'Yes' if NEO4J_URI else 'No'}")
-logger.debug(f"Neo4j Username configured: {'Yes' if NEO4J_USERNAME else 'No'}")
+logger.debug(f"Neo4j User configured: {'Yes' if NEO4J_USER else 'No'}")
 logger.debug(f"Neo4j Password configured: {'Yes' if NEO4J_PASSWORD else 'No'}")
 
 # LlamaIndex Configuration
