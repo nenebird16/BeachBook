@@ -3,32 +3,18 @@
 {% block content %}
 <div class="container-fluid">
     <div class="row">
-        <!-- Left Column: Query Interface -->
-        <div class="col-md-4">
+        <!-- Left Column: Chat Interface -->
+        <div class="col-md-8">
             <div class="card h-100">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Query Knowledge Graph CHAT</h5>
+                    <h5 class="card-title mb-0">Knowledge Graph Chat</h5>
                 </div>
                 <div class="card-body d-flex flex-column">
-                    <div id="chatHistory" class="flex-grow-1 mb-3 overflow-auto"></div>
-                    <form id="queryForm" class="mt-auto">
-                        <div class="mb-3">
-                            <textarea class="form-control" id="queryText" rows="3" placeholder="Enter your query here..."></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Submit Query</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <!-- Middle Column: Cypher Queries -->
-        <div class="col-md-4">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">Generated Cypher Queries</h5>
-                </div>
-                <div class="card-body">
-                    <div id="cypherQueries" class="cypher-query-container"></div>
+                    <div id="chatHistory" class="flex-grow-1 mb-3"></div>
+                    <div class="chat-input-container">
+                        <textarea class="form-control" id="queryText" rows="1" placeholder="Ask a question..."
+                            style="resize: none;"></textarea>
+                    </div>
                 </div>
             </div>
         </div>
@@ -46,8 +32,21 @@
         </div>
     </div>
 
-    <!-- Document Upload Section at the bottom -->
+    <!-- Bottom Row: Cypher Queries & Document Upload -->
     <div class="row mt-4">
+        <!-- Cypher Queries -->
+        <div class="col-12 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Generated Cypher Queries</h5>
+                </div>
+                <div class="card-body">
+                    <div id="cypherQueries" class="cypher-query-container-wide"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Document Upload -->
         <div class="col-12">
             <div class="card">
                 <div class="card-header">
@@ -72,16 +71,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const chatHistory = document.getElementById('chatHistory');
     const cypherQueries = document.getElementById('cypherQueries');
     const auditTrail = document.getElementById('auditTrail');
+    const queryInput = document.getElementById('queryText');
 
     // Function to scroll a container to bottom with smooth animation
     function scrollToBottom(container) {
         container.scrollTop = container.scrollHeight;
     }
 
-    // Handle query submission
-    document.getElementById('queryForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const queryText = document.getElementById('queryText').value;
+    // Function to handle query submission
+    function submitQuery() {
+        const queryText = queryInput.value.trim();
+        if (!queryText) return;
 
         // Add user query to chat with smooth scroll
         chatHistory.innerHTML += `
@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', function() {
             scrollToBottom(chatHistory);
 
             // Display Cypher queries
-            cypherQueries.innerHTML += `
+            cypherQueries.innerHTML = `
                 <div class="cypher-query mb-3">
                     <h6>Content Query:</h6>
                     <pre><code>${data.technical_details.queries.content_query}</code></pre>
@@ -138,7 +138,8 @@ document.addEventListener('DOMContentLoaded', function() {
             scrollToBottom(auditTrail);
 
             // Clear input
-            document.getElementById('queryText').value = '';
+            queryInput.value = '';
+            queryInput.style.height = 'auto';
         })
         .catch(error => {
             chatHistory.innerHTML += `
@@ -148,6 +149,20 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
         });
+    }
+
+    // Handle Enter key in textarea (Shift+Enter for new line)
+    queryInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            submitQuery();
+        }
+    });
+
+    // Auto-expand textarea
+    queryInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
     });
 
     // Handle document upload
