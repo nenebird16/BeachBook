@@ -13,4 +13,6 @@ dependencies = [
     "openai>=1.66.3",
     "psycopg2-binary>=2.9.10",
     "py2neo>=2021.2.4",
+    "llama-index-core>=0.12.24.post1",
+    "anthropic>=0.49.0",
 ]
