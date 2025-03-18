@@ -43,11 +43,6 @@ class LlamaService:
                            score
                     ORDER BY score DESC
                     LIMIT 5
-                """,
-                "entity_context": """
-                    MATCH (e:Entity {name: $entity_name})<-[:CONTAINS]-(d:Document)
-                    RETURN d.content as content, e.name as entity
-                    LIMIT 3
                 """
             }
 
@@ -90,8 +85,28 @@ class LlamaService:
         try:
             self.logger.info(f"Processing query: {query_text}")
 
-            if not hasattr(self, 'index'):
+            # Check if index exists and log its status
+            has_index = hasattr(self, 'index')
+            self.logger.debug(f"Vector index exists: {has_index}")
+
+            if not has_index:
+                self.logger.warning("No vector index found - document needs to be uploaded first")
                 return "Please upload a document first before querying."
+
+            # Try to verify document existence in Neo4j
+            try:
+                doc_check = self.graph_store.raw_query(
+                    query_text="MATCH (d:Document) RETURN count(d) as count",
+                    parameters={}
+                )
+                doc_count = doc_check[0]['count'] if doc_check else 0
+                self.logger.debug(f"Number of documents in Neo4j: {doc_count}")
+
+                if doc_count == 0:
+                    self.logger.warning("No documents found in Neo4j graph")
+                    return "No documents found in the knowledge graph. Please upload a document first."
+            except Exception as e:
+                self.logger.error(f"Error checking Neo4j documents: {str(e)}")
 
             # Execute graph RAG query
             result = self.graph_store.raw_query(
@@ -101,7 +116,7 @@ class LlamaService:
             )
             self.logger.debug(f"Graph query result: {result}")
 
-            # Create hybrid retriever combining vector and graph results
+            # Create hybrid retriever
             retriever = VectorIndexRetriever(
                 index=self.index,
                 similarity_top_k=3

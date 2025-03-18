@@ -21,6 +21,7 @@ class DocumentProcessor:
             if file.filename.endswith('.txt'):
                 # For text files, decode as UTF-8
                 file_content = file.read().decode('utf-8')
+                self.logger.info(f"Processing text file: {file.filename}")
             elif file.filename.endswith(('.pdf', '.doc', '.docx')):
                 # For binary files, read as bytes
                 file_content = file.read()
@@ -38,14 +39,20 @@ class DocumentProcessor:
 
             doc_info['content'] = file_content
 
-            # Process with LlamaIndex
+            # Process with LlamaIndex first
+            self.logger.info("Processing document with LlamaIndex...")
             self.llama_service.process_document(file_content)
+            self.logger.info("Document processed successfully with LlamaIndex")
 
             # Create document node in Neo4j
+            self.logger.info("Creating document node in Neo4j...")
             doc_node = self.graph_service.create_document_node(doc_info)
+            self.logger.info("Document node created successfully in Neo4j")
 
             # Extract and create entity relationships
+            self.logger.info("Creating entity relationships...")
             self.create_basic_entities(doc_node, file_content)
+            self.logger.info("Entity relationships created successfully")
 
             return doc_info
 
