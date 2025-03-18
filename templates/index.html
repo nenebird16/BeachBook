@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title">Upload Document</h5>
+            </div>
+            <div class="card-body">
+                <form id="uploadForm">
+                    <div class="mb-3">
+                        <input type="file" class="form-control" id="documentFile" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-upload"></i> Upload
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">Query Knowledge Base</h5>
+            </div>
+            <div class="card-body">
+                <form id="queryForm">
+                    <div class="mb-3">
+                        <textarea class="form-control" id="queryText" rows="3" placeholder="Enter your query..." required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-search"></i> Query
+                    </button>
+                </form>
+                <div id="queryResult" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">Knowledge Graph Visualization</h5>
+            </div>
+            <div class="card-body">
+                <div id="graphVisualization"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/graph_visualization.js') }}"></script>
+<script>
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData();
+    formData.append('file', document.getElementById('documentFile').files[0]);
+
+    try {
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (response.ok) {
+            alert('Document uploaded successfully!');
+            updateGraph();
+        } else {
+            alert(`Error: ${data.error}`);
+        }
+    } catch (error) {
+        alert('Error uploading document');
+    }
+});
+
+document.getElementById('queryForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const query = document.getElementById('queryText').value;
+
+    try {
+        const response = await fetch('/query', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            document.getElementById('queryResult').innerHTML = `
+                <div class="alert alert-success">
+                    ${data.response}
+                </div>`;
+        } else {
+            document.getElementById('queryResult').innerHTML = `
+                <div class="alert alert-danger">
+                    ${data.error}
+                </div>`;
+        }
+    } catch (error) {
+        document.getElementById('queryResult').innerHTML = `
+            <div class="alert alert-danger">
+                Error processing query
+            </div>`;
+    }
+});
+
+// Initial graph load
+updateGraph();
+</script>
+{% endblock %}
