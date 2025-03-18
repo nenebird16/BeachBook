@@ -19,22 +19,22 @@ class LlamaService:
             self.logger.debug(f"Original URI scheme: {uri.scheme}")
             self.logger.debug(f"Original URI netloc: {uri.netloc}")
 
-            # For AuraDB, construct the bolt URL directly
+            # Configure connection for AuraDB
             if uri.scheme == 'neo4j+s':
                 # AuraDB requires bolt+s:// format
-                bolt_uri = f"bolt+s://{uri.netloc}"
+                url = f"bolt+s://{uri.netloc}"
                 self.logger.info("Using AuraDB connection format")
             else:
-                bolt_uri = NEO4J_URI
+                url = NEO4J_URI
                 self.logger.info("Using standard Neo4j connection format")
 
-            self.logger.debug(f"Final connection URI (without credentials): {bolt_uri}")
+            self.logger.debug(f"Final connection URI (without credentials): {url}")
             self.logger.debug(f"Attempting to connect with user: {NEO4J_USER}")
 
             self.graph_store = Neo4jGraphStore(
                 username=NEO4J_USER,
                 password=NEO4J_PASSWORD,
-                url=bolt_uri,
+                url=url,
                 database="neo4j"
             )
             self.storage_context = StorageContext.from_defaults(graph_store=self.graph_store)
