@@ -2,7 +2,11 @@ import logging
 from datetime import datetime
 import spacy
 import json
+import nltk
 from typing import Dict, List, Any, Optional
+
+# Download required NLTK data
+nltk.download('punkt')
 
 class DocumentProcessor:
     def __init__(self, graph_service, llama_service, semantic_processor=None):
@@ -10,7 +14,14 @@ class DocumentProcessor:
         self.llama_service = llama_service
         self.semantic_processor = semantic_processor
         self.logger = logging.getLogger(__name__)
-        self.nlp = spacy.load("en_core_web_sm")
+
+        try:
+            # Initialize spaCy model
+            self.nlp = spacy.load("en_core_web_sm")
+            self.logger.info("Successfully loaded spaCy model")
+        except Exception as e:
+            self.logger.error(f"Error loading spaCy model: {str(e)}")
+            raise
 
         # Schema definitions for validation
         self.entity_schemas = self._load_entity_schemas()

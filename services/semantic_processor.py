@@ -2,15 +2,25 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 import logging
 from typing import List, Dict, Optional
 import spacy
+import nltk
 from nltk.tokenize import sent_tokenize
 import json
+
+# Download required NLTK data
+nltk.download('punkt', quiet=True)
 
 class SemanticProcessor:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         try:
-            # Initialize models
-            self.nlp = spacy.load("en_core_web_sm")
+            # Initialize spaCy model
+            try:
+                self.nlp = spacy.load("en_core_web_sm")
+            except OSError:
+                self.logger.info("Downloading spaCy model...")
+                spacy.cli.download("en_core_web_sm")
+                self.nlp = spacy.load("en_core_web_sm")
+
             self.embed_model = OpenAIEmbedding(
                 model_name="text-embedding-3-small",
                 dimensions=1536
@@ -76,14 +86,14 @@ class SemanticProcessor:
 
             # Extract query entities and intent
             doc = self.nlp(query)
-            query_entities = [{'text': ent.text, 'label': ent.label_} 
+            query_entities = [{'text': ent.text, 'label': ent.label_}
                             for ent in doc.ents]
 
             # Identify main focus of query
             root = next(token for token in doc if token.head == token)
             focus = {
                 'root_verb': root.text if root.pos_ == 'VERB' else None,
-                'main_noun': next((token.text for token in doc 
+                'main_noun': next((token.text for token in doc
                                  if token.pos_ == 'NOUN'), None)
             }
 
