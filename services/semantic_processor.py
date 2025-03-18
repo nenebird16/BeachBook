@@ -8,6 +8,7 @@ import json
 
 # Download required NLTK data
 nltk.download('punkt', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 
 class SemanticProcessor:
     def __init__(self):

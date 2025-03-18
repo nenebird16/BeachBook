@@ -7,6 +7,7 @@ from typing import Dict, List, Any, Optional
 
 # Download required NLTK data
 nltk.download('punkt')
+nltk.download('punkt_tab')
 
 class DocumentProcessor:
     def __init__(self, graph_service, llama_service, semantic_processor=None):
