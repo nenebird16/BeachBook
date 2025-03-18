@@ -188,17 +188,23 @@ class LlamaService:
     def _get_graph_overview(self):
         """Get an overview of entities and topics in the graph"""
         try:
-            # Query to get entity types and counts
+            # Get all entity types and their instances
             entity_query = """
             MATCH (e:Entity)
             WITH e.type as type, collect(distinct e.name) as entities
             RETURN type, entities
             ORDER BY size(entities) DESC
-            LIMIT 5
             """
             entity_results = self.graph.run(entity_query).data()
 
-            # Query to get document counts and titles
+            # Get all visual elements
+            visual_query = """
+            MATCH (v:VisualElement)
+            RETURN collect(distinct v.name) as visual_elements
+            """
+            visual_results = self.graph.run(visual_query).data()
+
+            # Get document count and sample titles
             doc_query = """
             MATCH (d:Document)
             RETURN count(d) as doc_count,
@@ -206,11 +212,13 @@ class LlamaService:
             """
             doc_results = self.graph.run(doc_query).data()
 
-            if not entity_results and not doc_results[0]['doc_count']:
+            if not entity_results and not doc_results[0]['doc_count'] and not visual_results:
                 return None
 
             # Format overview
             overview = []
+
+            # Add document information
             if doc_results[0]['doc_count']:
                 overview.append(f"Documents: {doc_results[0]['doc_count']} total")
                 if doc_results[0]['sample_titles']:
@@ -219,12 +227,21 @@ class LlamaService:
                         overview.append(f"- {title}")
                     overview.append("")
 
+            # Add entity information
             if entity_results:
-                overview.append("Entity types and examples:")
+                overview.append("Topics and concepts found:")
                 for result in entity_results:
-                    entity_type = result['type'] or 'general'
-                    entities = result['entities'][:5]  # Limit to 5 examples
-                    overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
+                    if result['type'] and result['entities']:  # Only show non-empty categories
+                        entity_type = result['type']
+                        entities = result['entities'][:5]  # Limit to 5 examples
+                        overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
+                overview.append("")
+
+            # Add visual elements
+            if visual_results and visual_results[0]['visual_elements']:
+                overview.append("Visual elements and concepts:")
+                visual_elements = visual_results[0]['visual_elements'][:5]  # Limit to 5 examples
+                overview.append(f"- {', '.join(visual_elements)}")
 
             return "\n".join(overview)
 
