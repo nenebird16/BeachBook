@@ -1,35 +1,47 @@
 from py2neo import Graph, Node, Relationship
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
 class GraphService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         try:
-            if not NEO4J_URI or not NEO4J_USER or not NEO4J_PASSWORD:
-                raise ValueError("Neo4j credentials not properly configured. Check environment variables.")
+            if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
+                raise ValueError("Neo4j credentials not properly configured")
 
-            # Parse the URI for AuraDB connection
+            # Parse and convert the URI for AuraDB connection
             uri = urlparse(NEO4J_URI)
+            self.logger.debug(f"Original URI scheme: {uri.scheme}")
+            self.logger.debug(f"Original URI netloc: {uri.netloc}")
+
+            # Convert neo4j+s to bolt+s for AuraDB
             if uri.scheme == 'neo4j+s':
-                # For AuraDB, use bolt+s://
-                netloc = uri.netloc
-                bolt_uri = f"bolt+s://{netloc}"
-                self.logger.info(f"Using AuraDB connection with URI: {bolt_uri}")
+                # Reconstruct the URI with bolt+s scheme
+                bolt_uri = urlunparse(('bolt+s', uri.netloc, '', '', '', ''))
+            elif uri.scheme == 'neo4j':
+                # Standard Neo4j
+                bolt_uri = urlunparse(('bolt', uri.netloc, '', '', '', ''))
             else:
                 bolt_uri = NEO4J_URI
-                self.logger.info(f"Using standard connection with URI: {bolt_uri}")
 
-            self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USER}")
-            self.graph = Graph(
-                bolt_uri,
-                auth=(NEO4J_USER, NEO4J_PASSWORD),
-                name="neo4j"
-            )
-            self.logger.info("Successfully connected to Neo4j database")
+            self.logger.info(f"Converted URI scheme: {urlparse(bolt_uri).scheme}")
+            self.logger.debug(f"Attempting to connect with user: {NEO4J_USER}")
+
+            try:
+                self.graph = Graph(
+                    bolt_uri,
+                    auth=(NEO4J_USER, NEO4J_PASSWORD)
+                )
+                # Test the connection
+                result = self.graph.run("RETURN 1 as test").data()
+                self.logger.info("Successfully connected to Neo4j database")
+                self.logger.debug(f"Test query result: {result}")
+            except Exception as e:
+                self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
+                raise
         except Exception as e:
-            self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
+            self.logger.error(f"Failed to initialize GraphService: {str(e)}")
             raise
 
     def create_document_node(self, doc_info):

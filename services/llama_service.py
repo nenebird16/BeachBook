@@ -1,8 +1,8 @@
 from llama_index.core import VectorStoreIndex, Document, Settings, StorageContext
 from llama_index.graph_stores.neo4j import Neo4jGraphStore
 import logging
-from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
-from urllib.parse import urlparse
+from config import OPENAI_API_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+from urllib.parse import urlparse, urlunparse
 
 class LlamaService:
     def __init__(self):
@@ -11,20 +11,29 @@ class LlamaService:
 
         # Initialize Neo4j graph store
         try:
-            # Parse the URI
+            if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
+                raise ValueError("Neo4j credentials not properly configured")
+
+            # Parse and convert the URI for AuraDB connection
             uri = urlparse(NEO4J_URI)
+            self.logger.debug(f"Original URI scheme: {uri.scheme}")
+            self.logger.debug(f"Original URI netloc: {uri.netloc}")
+
+            # Convert neo4j+s to bolt+s for AuraDB
             if uri.scheme == 'neo4j+s':
-                # For AuraDB, use bolt+s://
-                netloc = uri.netloc
-                bolt_uri = f"bolt+s://{netloc}"
-                self.logger.info(f"Using AuraDB connection with URI: {bolt_uri}")
+                # Reconstruct the URI with bolt+s scheme
+                bolt_uri = urlunparse(('bolt+s', uri.netloc, '', '', '', ''))
+            elif uri.scheme == 'neo4j':
+                # Standard Neo4j
+                bolt_uri = urlunparse(('bolt', uri.netloc, '', '', '', ''))
             else:
                 bolt_uri = NEO4J_URI
-                self.logger.info(f"Using standard connection with URI: {bolt_uri}")
 
-            self.logger.debug(f"Attempting to connect to Neo4j with user: {NEO4J_USERNAME}")
+            self.logger.info(f"Converted URI scheme: {urlparse(bolt_uri).scheme}")
+            self.logger.debug(f"Attempting to connect with user: {NEO4J_USER}")
+
             self.graph_store = Neo4jGraphStore(
-                username=NEO4J_USERNAME,
+                username=NEO4J_USER,
                 password=NEO4J_PASSWORD,
                 url=bolt_uri,
                 database="neo4j"
