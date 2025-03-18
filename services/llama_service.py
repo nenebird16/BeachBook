@@ -63,8 +63,7 @@ class LlamaService:
             self.logger.info(f"Processing query: {query_text}")
 
             # Create query engine with more specific parameters
-            query_engine = self.graph_store.as_query_engine(
-                response_mode="tree_summarize",
+            query_engine = self.graph_store.query_engine(
                 verbose=True,
                 similarity_top_k=3  # Retrieve top 3 most relevant nodes
             )
