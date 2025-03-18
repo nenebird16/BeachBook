@@ -23,15 +23,6 @@ class LlamaService:
             self.logger.debug(f"Original URI scheme: {uri.scheme}")
             self.logger.debug(f"Original URI netloc: {uri.netloc}")
 
-            if uri.scheme == 'neo4j+s':
-                url = f"bolt+s://{uri.netloc}"
-                self.logger.info("Using AuraDB connection format")
-            else:
-                url = NEO4J_URI
-                self.logger.info("Using standard Neo4j connection format")
-
-            self.logger.debug(f"Final connection URI (without credentials): {url}")
-
             # Initialize direct Neo4j connection for queries
             profile = ConnectionProfile(
                 scheme="bolt+s" if uri.scheme == 'neo4j+s' else uri.scheme,
@@ -48,7 +39,7 @@ class LlamaService:
             self.graph_store = Neo4jGraphStore(
                 username=NEO4J_USER,
                 password=NEO4J_PASSWORD,
-                url=url,
+                url=f"bolt+s://{uri.netloc}" if uri.scheme == 'neo4j+s' else NEO4J_URI,
                 database="neo4j"
             )
             self.logger.info("Successfully initialized Neo4j graph store")
@@ -67,21 +58,33 @@ class LlamaService:
             self.logger.error(f"Error processing document: {str(e)}")
             raise
 
-    def generate_response(self, query, context_info):
+    def generate_response(self, query, context_info=None):
         """Generate a natural language response using Claude"""
         try:
-            prompt = f"""Based on the following context from a knowledge graph, help me answer this query: "{query}"
+            if context_info:
+                prompt = f"""Based on the following context from a knowledge graph, help me answer this query: "{query}"
 
-            Context information:
-            {context_info}
+                Context information:
+                {context_info}
 
-            Please provide a natural, conversational response that:
-            1. Directly answers the query
-            2. Incorporates relevant information from the context
-            3. Highlights key relationships between concepts
-            4. Suggests related areas to explore if relevant
+                Please provide a natural, conversational response that:
+                1. Directly answers the query
+                2. Incorporates relevant information from the context
+                3. Highlights key relationships between concepts
+                4. Suggests related areas to explore if relevant
 
-            Response:"""
+                Response:"""
+            else:
+                prompt = f"""As a knowledgeable assistant connected to a graph database, please respond to this query: "{query}"
+
+                Even though I don't find specific matches in the knowledge graph for this query, 
+                I should still provide a helpful and conversational response.
+
+                If this appears to be a greeting or general question, respond naturally.
+                If this is a specific query, explain that while I don't have exact matches,
+                I can help search for related information or suggest how to rephrase the query.
+
+                Response:"""
 
             response = self.anthropic.messages.create(
                 model="claude-3-opus-20240229",
@@ -139,34 +142,7 @@ class LlamaService:
             entity_results = self.graph.run(entity_query, query=query_text).data()
             self.logger.debug(f"Entity query results: {entity_results}")
 
-            # Prepare context for AI response
-            context_sections = []
-
-            if content_results:
-                context_sections.append("Content matches:")
-                for result in content_results:
-                    context_sections.append(f"- Document: {result['title']}")
-                    context_sections.append(f"  Content: {result['content'][:500]}")
-                    if result['entities']:
-                        context_sections.append(f"  Related concepts: {', '.join(result['entities'])}")
-                    context_sections.append("")
-
-            if entity_results:
-                context_sections.append("Entity matches:")
-                for result in entity_results:
-                    context_sections.append(f"- Found in: {result['title']}")
-                    context_sections.append(f"  Context: {result['content'][:500]}")
-                    context_sections.append(f"  Related concepts: {', '.join(result['entities'])}")
-                    context_sections.append("")
-
-            context_info = "\n".join(context_sections)
-
-            # Generate AI response
-            ai_response = None
-            if content_results or entity_results:
-                ai_response = self.generate_response(query_text, context_info)
-
-            # Format complete response with queries (for debugging) and AI response
+            # Format response
             response = "Here's what I found in the knowledge graph:\n\n"
 
             # Add queries used (for debugging)
@@ -174,14 +150,36 @@ class LlamaService:
             response += "1. Content Query:\n```cypher\n" + content_query + "\n```\n\n"
             response += "2. Entity Query:\n```cypher\n" + entity_query + "\n```\n\n"
 
+            # Prepare context for AI response if we have matches
+            context_info = None
+            if content_results or entity_results:
+                context_sections = []
+                if content_results:
+                    context_sections.append("Content matches:")
+                    for result in content_results:
+                        context_sections.append(f"- Document: {result['title']}")
+                        context_sections.append(f"  Content: {result['content'][:500]}")
+                        if result['entities']:
+                            context_sections.append(f"  Related concepts: {', '.join(result['entities'])}")
+                        context_sections.append("")
+
+                if entity_results:
+                    context_sections.append("Entity matches:")
+                    for result in entity_results:
+                        context_sections.append(f"- Found in: {result['title']}")
+                        context_sections.append(f"  Context: {result['content'][:500]}")
+                        context_sections.append(f"  Related concepts: {', '.join(result['entities'])}")
+                        context_sections.append("")
+
+                context_info = "\n".join(context_sections)
+
+            # Generate AI response (with or without context)
+            ai_response = self.generate_response(query_text, context_info)
+
             if ai_response:
                 response += "Claude's Response:\n" + ai_response + "\n\n"
-                response += "Raw Results:\n" + context_info
-            else:
-                response = "I couldn't find any relevant information in the knowledge graph for your query.\n\n"
-                response += "Queries attempted:\n"
-                response += "1. Content Query:\n```cypher\n" + content_query + "\n```\n\n"
-                response += "2. Entity Query:\n```cypher\n" + entity_query + "\n```\n"
+                if context_info:
+                    response += "Raw Results:\n" + context_info
 
             return response
 
