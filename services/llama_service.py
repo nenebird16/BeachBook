@@ -5,6 +5,7 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from urllib.parse import urlparse
 from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
+from services.semantic_processor import SemanticProcessor
 import json
 
 class LlamaService:
@@ -14,6 +15,9 @@ class LlamaService:
 
         # Initialize Anthropic client for Claude
         self.anthropic = Anthropic()
+
+        # Initialize semantic processor
+        self.semantic_processor = SemanticProcessor()
 
         try:
             if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
@@ -45,16 +49,62 @@ class LlamaService:
             )
             self.logger.info("Successfully initialized Neo4j graph store")
 
+            # Create vector index if it doesn't exist
+            self._ensure_vector_index()
+
         except Exception as e:
             self.logger.error(f"Failed to initialize Neo4j connections: {str(e)}")
+            raise
+
+    def _ensure_vector_index(self):
+        """Create vector index for semantic search if it doesn't exist"""
+        try:
+            # Check if index exists
+            index_query = """
+            SHOW INDEXES
+            YIELD name, type
+            WHERE name = 'document_embeddings'
+            """
+            result = list(self.graph.run(index_query))
+
+            if not result:
+                # Create vector index
+                create_index = """
+                CALL db.index.vector.createNodeIndex(
+                    'document_embeddings',
+                    'Document',
+                    'embedding',
+                    1536,
+                    'cosine'
+                )
+                """
+                self.graph.run(create_index)
+                self.logger.info("Created vector index for document embeddings")
+            else:
+                self.logger.info("Vector index already exists")
+
+        except Exception as e:
+            self.logger.error(f"Error ensuring vector index: {str(e)}")
             raise
 
     def process_document(self, content):
         """Process document content for storage"""
         try:
             self.logger.info("Processing document for storage")
-            # Note: Document processing now handled by DocumentProcessor
+            # Process document with semantic processor
+            doc_info = self.semantic_processor.process_document(content)
+
+            # Store embeddings in Neo4j
+            for chunk in doc_info['embeddings']:
+                query = """
+                MATCH (d:Document {content: $content})
+                SET d.embedding = $embedding
+                """
+                self.graph.run(query, content=chunk['text'], 
+                             embedding=chunk['embedding'])
+
             return True
+
         except Exception as e:
             self.logger.error(f"Error processing document: {str(e)}")
             raise
@@ -113,60 +163,84 @@ class LlamaService:
             return None
 
     def process_query(self, query_text):
-        """Process a query using the graph knowledge base"""
+        """Process a query using hybrid search"""
         try:
             self.logger.info(f"Processing query: {query_text}")
 
-            # Content-based search
-            content_query = """
-                MATCH (d:Document)
-                WHERE toLower(d.content) CONTAINS toLower($query)
-                MATCH (d)-[r:CONTAINS]->(e:Entity)
-                RETURN d.content as content, 
-                       d.title as title,
-                       collect(distinct e.name) as entities,
-                       count(e) as relevance
-                ORDER BY relevance DESC
-                LIMIT 5
+            # Analyze query semantically
+            query_analysis = self.semantic_processor.analyze_query(query_text)
+            query_embedding = query_analysis['embedding']
+
+            # Vector similarity search
+            vector_query = """
+            CALL db.index.vector.queryNodes(
+                'document_embeddings',
+                5,
+                $embedding
+            ) YIELD node, score
+            WITH node, score
+            MATCH (node)-[:CONTAINS]->(e:Entity)
+            RETURN node.content as content,
+                   node.title as title,
+                   collect(distinct e.name) as entities,
+                   score as relevance
+            ORDER BY relevance DESC
             """
-            content_results = self.graph.run(content_query, query=query_text).data()
+            vector_results = self.graph.run(vector_query, 
+                                          embedding=query_embedding).data()
+            self.logger.debug(f"Vector query results: {vector_results}")
+
+            # Content-based search as backup
+            content_query = """
+            MATCH (d:Document)
+            WHERE toLower(d.content) CONTAINS toLower($query)
+            MATCH (d)-[r:CONTAINS]->(e:Entity)
+            RETURN d.content as content, 
+                   d.title as title,
+                   collect(distinct e.name) as entities,
+                   count(e) as relevance
+            ORDER BY relevance DESC
+            LIMIT 5
+            """
+            content_results = self.graph.run(content_query, 
+                                           query=query_text).data()
             self.logger.debug(f"Content query results: {content_results}")
 
-            # Entity-based search
+            # Entity-based expansion
             entity_query = """
-                MATCH (e:Entity)
-                WHERE toLower(e.name) CONTAINS toLower($query)
-                WITH e
-                MATCH (d:Document)-[:CONTAINS]->(e)
-                RETURN d.content as content,
-                       d.title as title,
-                       collect(distinct e.name) as entities
-                LIMIT 5
+            MATCH (e:Entity)
+            WHERE toLower(e.name) CONTAINS toLower($query)
+            WITH e
+            MATCH (d:Document)-[:CONTAINS]->(e)
+            RETURN d.content as content,
+                   d.title as title,
+                   collect(distinct e.name) as entities
+            LIMIT 5
             """
-            entity_results = self.graph.run(entity_query, query=query_text).data()
+            entity_results = self.graph.run(entity_query, 
+                                          query=query_text).data()
             self.logger.debug(f"Entity query results: {entity_results}")
 
-            # Prepare context for AI response if we have matches
+            # Combine and deduplicate results
+            all_results = vector_results + content_results + entity_results
+            seen_titles = set()
+            unique_results = []
+            for result in all_results:
+                if result['title'] not in seen_titles:
+                    seen_titles.add(result['title'])
+                    unique_results.append(result)
+
+            # Prepare context for AI response
             context_info = None
-            if content_results or entity_results:
+            if unique_results:
                 context_sections = []
-                if content_results:
-                    context_sections.append("Content matches:")
-                    for result in content_results:
-                        context_sections.append(f"- Document: {result['title']}")
-                        context_sections.append(f"  Content: {result['content'][:500]}")
-                        if result['entities']:
-                            context_sections.append(f"  Related concepts: {', '.join(result['entities'])}")
-                        context_sections.append("")
-
-                if entity_results:
-                    context_sections.append("Entity matches:")
-                    for result in entity_results:
-                        context_sections.append(f"- Found in: {result['title']}")
-                        context_sections.append(f"  Context: {result['content'][:500]}")
-                        context_sections.append(f"  Related concepts: {', '.join(result['entities'])}")
-                        context_sections.append("")
-
+                for result in unique_results[:5]:  # Top 5 unique results
+                    context_sections.append(f"- Document: {result['title']}")
+                    context_sections.append(f"  Content: {result['content'][:500]}")
+                    if result.get('entities'):
+                        context_sections.append(
+                            f"  Related concepts: {', '.join(result['entities'])}")
+                    context_sections.append("")
                 context_info = "\n".join(context_sections)
 
             # Generate AI response (with or without context)
@@ -176,8 +250,10 @@ class LlamaService:
             return {
                 'chat_response': ai_response,
                 'queries': {
+                    'vector_query': vector_query,
                     'content_query': content_query,
-                    'entity_query': entity_query
+                    'entity_query': entity_query,
+                    'query_analysis': query_analysis
                 },
                 'results': context_info if context_info else "No matches found in knowledge graph"
             }

@@ -38,7 +38,7 @@
         <div class="col-12 mb-4">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Generated Cypher Queries</h5>
+                    <h5 class="card-title mb-0">Query Analysis & Generated Cypher</h5>
                 </div>
                 <div class="card-body">
                     <div id="cypherQueries" class="cypher-query-container-wide"></div>
@@ -112,17 +112,28 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
-            // Display Cypher queries
-            cypherQueries.innerHTML = `
+            // Display query analysis and Cypher queries
+            const queryAnalysis = data.technical_details.queries.query_analysis;
+            let queryContent = `
                 <div class="cypher-query mb-3">
-                    <h6>Content Query:</h6>
+                    <h6>Query Analysis:</h6>
+                    <pre><code>Entities: ${JSON.stringify(queryAnalysis.entities, null, 2)}
+Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
+                </div>
+                <div class="cypher-query mb-3">
+                    <h6>Vector Similarity Search:</h6>
+                    <pre><code>${data.technical_details.queries.vector_query}</code></pre>
+                </div>
+                <div class="cypher-query mb-3">
+                    <h6>Content-Based Search:</h6>
                     <pre><code>${data.technical_details.queries.content_query}</code></pre>
                 </div>
                 <div class="cypher-query">
-                    <h6>Entity Query:</h6>
+                    <h6>Entity-Based Expansion:</h6>
                     <pre><code>${data.technical_details.queries.entity_query}</code></pre>
                 </div>
             `;
+            cypherQueries.innerHTML = queryContent;
             scrollToBottom(cypherQueries);
 
             // Update audit trail
