@@ -32,54 +32,15 @@
         </div>
     </div>
 
-    <!-- Bottom Row: Cypher Queries & Document Upload -->
+    <!-- Bottom Row: Cypher Queries -->
     <div class="row mt-4">
-        <!-- Cypher Queries -->
-        <div class="col-12 mb-4">
+        <div class="col-12">
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">Query Analysis & Generated Cypher</h5>
                 </div>
                 <div class="card-body">
                     <div id="cypherQueries" class="cypher-query-container-wide"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Document Upload -->
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">Upload Document</h5>
-                </div>
-                <div class="card-body">
-                    <div class="d-flex gap-3">
-                        <div class="custom-file-input position-relative flex-grow-1">
-                            <input type="file" class="d-none" id="documentFile" name="file" accept=".txt,.doc,.docx,.pdf">
-                            <div class="form-control d-flex align-items-center cursor-pointer" id="fileDisplay">
-                                <span class="text-muted" id="fileDisplayText">Choose a file...</span>
-                            </div>
-                        </div>
-                        <button type="button" id="uploadButton" class="btn btn-primary position-relative" disabled>
-                            Upload
-                            <div class="upload-spinner spinner-border spinner-border-sm position-absolute top-50 end-0 translate-middle-y me-2 d-none" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                        </button>
-                    </div>
-                    <!-- Processing Status -->
-                    <div id="processingStatus" class="mt-3 d-none">
-                        <div class="progress" style="height: 25px;">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                                 role="progressbar" style="width: 0%">
-                                <span class="progress-text">Initializing...</span>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Success Message -->
-                    <div id="successMessage" class="alert alert-success mt-3 d-none">
-                        Document uploaded and processed successfully!
-                    </div>
                 </div>
             </div>
         </div>
@@ -94,199 +55,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const cypherQueries = document.getElementById('cypherQueries');
     const auditTrail = document.getElementById('auditTrail');
     const queryInput = document.getElementById('queryText');
-    const uploadButton = document.getElementById('uploadButton');
-    const documentFile = document.getElementById('documentFile');
-    const fileDisplay = document.getElementById('fileDisplay');
-    const fileDisplayText = document.getElementById('fileDisplayText');
-    const uploadSpinner = document.querySelector('.upload-spinner');
-    const processingStatus = document.getElementById('processingStatus');
-    const progressBar = processingStatus.querySelector('.progress-bar');
-    const progressText = processingStatus.querySelector('.progress-text');
-    const successMessage = document.getElementById('successMessage');
-
-    let isUploading = false;
-
-    function resetUploadInterface() {
-        documentFile.value = '';
-        fileDisplayText.textContent = 'Choose a file...';
-        fileDisplay.classList.remove('has-file');
-        processingStatus.classList.add('d-none');
-        successMessage.classList.add('d-none');
-        progressBar.style.width = '0%';
-        uploadSpinner.classList.add('d-none');
-        uploadButton.disabled = true;
-        isUploading = false;
-    }
 
     function scrollToBottom(container) {
         container.scrollTop = container.scrollHeight;
     }
-
-    function updateProcessingStatus(stage, progress) {
-        if (isUploading) {
-            const stages = {
-                'uploading': 'Uploading document...',
-                'extracting': 'Extracting content...',
-                'processing': 'Processing document...',
-                'analyzing': 'Analyzing content...',
-                'storing': 'Storing in knowledge graph...',
-                'complete': 'Processing complete!',
-                'error': 'Error occurred'
-            };
-
-            processingStatus.classList.remove('d-none');
-            progressBar.style.width = `${progress}%`;
-            progressText.textContent = stages[stage] || stage;
-
-            if (stage === 'complete') {
-                progressBar.classList.remove('bg-danger');
-
-                // Add success entry to audit trail
-                auditTrail.innerHTML += `
-                    <div class="audit-entry mb-2">
-                        <small class="text-muted">${new Date().toLocaleTimeString()}</small>
-                        <div>Uploaded: ${documentFile.files[0].name}</div>
-                        <div>Status: Success</div>
-                    </div>
-                `;
-                scrollToBottom(auditTrail);
-
-                // Show success message and reset interface after completion
-                progressBar.style.width = '100%';
-                setTimeout(() => {
-                    successMessage.classList.remove('d-none');
-                    uploadSpinner.classList.add('d-none');
-
-                    // Reset the interface after 5 seconds
-                    setTimeout(resetUploadInterface, 5000);
-                }, 1000);
-            } else if (stage === 'error') {
-                progressBar.classList.add('bg-danger');
-            } else {
-                successMessage.classList.add('d-none');
-                progressBar.classList.remove('bg-danger');
-            }
-        }
-    }
-
-    function handleUploadError(error, progressSource, filename) {
-        console.error('Upload error:', error);
-        if (progressSource) progressSource.close();
-        uploadSpinner.classList.add('d-none');
-        updateProcessingStatus('error', 100);
-
-        auditTrail.innerHTML += `
-            <div class="audit-entry error mb-2">
-                <small class="text-muted">${new Date().toLocaleTimeString()}</small>
-                <div>Upload failed: ${filename}</div>
-                <div>Error: ${error.message}</div>
-            </div>
-        `;
-        scrollToBottom(auditTrail);
-
-        // Reset interface after error
-        setTimeout(resetUploadInterface, 5000);
-    }
-
-    // Custom file selection
-    fileDisplay.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!isUploading) {
-            documentFile.click();
-        }
-    });
-
-    // Handle file selection
-    documentFile.addEventListener('change', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const file = this.files[0];
-        if (file) {
-            fileDisplayText.textContent = file.name;
-            fileDisplay.classList.add('has-file');
-            uploadButton.disabled = false;
-        } else {
-            fileDisplayText.textContent = 'Choose a file...';
-            fileDisplay.classList.remove('has-file');
-            uploadButton.disabled = true;
-        }
-    });
-
-    // Handle file upload via button click
-    uploadButton.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const file = documentFile.files[0];
-        if (!file || isUploading) return;
-
-        isUploading = true;
-        uploadButton.disabled = true;
-        uploadSpinner.classList.remove('d-none');
-        processingStatus.classList.remove('d-none');
-        successMessage.classList.add('d-none');
-        progressBar.classList.remove('bg-danger');
-        progressBar.style.width = '0%';
-
-        const xhr = new XMLHttpRequest();
-        const formData = new FormData();
-        formData.append('file', file);
-
-        xhr.upload.onprogress = function(e) {
-            if (e.lengthComputable) {
-                const percent = (e.loaded / e.total) * 100;
-                updateProcessingStatus('uploading', percent);
-            }
-        };
-
-        xhr.open('POST', '/upload', true);
-        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-        xhr.setRequestHeader('Accept', 'application/json');
-
-        xhr.onload = function() {
-            if (xhr.status === 200) {
-                try {
-                    const response = JSON.parse(xhr.responseText);
-                    if (response.error) {
-                        throw new Error(response.error);
-                    }
-
-                    const progressSource = new EventSource(`/upload?filename=${encodeURIComponent(file.name)}`);
-
-                    progressSource.onmessage = function(event) {
-                        try {
-                            const data = JSON.parse(event.data);
-                            if (data.error) {
-                                throw new Error(data.error);
-                            }
-                            updateProcessingStatus(data.stage, data.progress);
-
-                            if (data.stage === 'complete') {
-                                progressSource.close();
-                            }
-                        } catch (error) {
-                            handleUploadError(error, progressSource, file.name);
-                        }
-                    };
-
-                    progressSource.onerror = function() {
-                        handleUploadError(new Error('EventSource connection failed'), progressSource, file.name);
-                    };
-                } catch (error) {
-                    handleUploadError(error, null, file.name);
-                }
-            } else {
-                handleUploadError(new Error(`HTTP error! status: ${xhr.status}`), null, file.name);
-            }
-        };
-
-        xhr.onerror = function() {
-            handleUploadError(new Error('Network error'), null, file.name);
-        };
-
-        xhr.send(formData);
-    });
 
     // Handle Enter key in textarea (Shift+Enter for new line)
     queryInput.addEventListener('keydown', function(e) {
@@ -307,6 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
 
+        // Add user message to chat
         chatHistory.innerHTML += `
             <div class="chat-message user-message mb-2">
                 <strong>You:</strong> ${queryText}
@@ -314,6 +87,7 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         scrollToBottom(chatHistory);
 
+        // Send query to server
         fetch('/query', {
             method: 'POST',
             headers: {
@@ -323,25 +97,21 @@ document.addEventListener('DOMContentLoaded', function() {
             body: JSON.stringify({query: queryText})
         })
         .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             return response.json();
         })
         .then(data => {
-            if (data.error) {
-                throw new Error(data.error);
-            }
+            if (data.error) throw new Error(data.error);
 
             // Display chat response
             chatHistory.innerHTML += `
                 <div class="chat-message bot-message mb-2">
-                    <strong>Bot:</strong> ${data.response || data.chat_response || 'No response available'}
+                    <strong>Bot:</strong> ${data.response}
                 </div>
             `;
             scrollToBottom(chatHistory);
 
-            // Only try to display technical details if they exist
+            // Display technical details
             if (data.technical_details && data.technical_details.queries) {
                 const queries = data.technical_details.queries;
                 const analysis = queries.query_analysis || {};
@@ -353,10 +123,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             <p><strong>Query Type:</strong> ${analysis.query_type || 'Unknown'}</p>
                             <p><strong>Database State:</strong> ${analysis.database_state || 'Unknown'}</p>
                             <p><strong>Timestamp:</strong> ${analysis.analysis_timestamp || 'Unknown'}</p>
-                            ${analysis.found_matches !== undefined ? 
-                                `<p><strong>Found Matches:</strong> ${analysis.found_matches}</p>
-                                 <p><strong>Direct Matches:</strong> ${analysis.direct_matches || 0}</p>
-                                 <p><strong>Related Matches:</strong> ${analysis.related_matches || 0}</p>` : ''}
+                            <p><strong>Found Matches:</strong> ${analysis.found_matches || false}</p>
+                            <p><strong>Direct Matches:</strong> ${analysis.direct_matches || 0}</p>
+                            <p><strong>Related Matches:</strong> ${analysis.related_matches || 0}</p>
                         </div>
                     </div>
                 `;
@@ -382,12 +151,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 cypherQueries.innerHTML = queryContent;
-                scrollToBottom(cypherQueries);
             }
 
             // Add to audit trail
-            const hasMatches = data.technical_details && data.technical_details.results !== "No matches found in knowledge graph";
             const timestamp = new Date().toLocaleTimeString();
+            const hasMatches = analysis && analysis.found_matches;
             auditTrail.innerHTML += `
                 <div class="audit-entry mb-2">
                     <small class="text-muted">${timestamp}</small>
@@ -397,13 +165,15 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(auditTrail);
 
+            // Clear input
             queryInput.value = '';
             queryInput.style.height = 'auto';
         })
         .catch(error => {
+            // Display error in chat
             chatHistory.innerHTML += `
                 <div class="chat-message error-message mb-2">
-                    <strong>Error:</strong> ${error.message || 'An unexpected error occurred'}
+                    <strong>Error:</strong> ${error.message}
                 </div>
             `;
             scrollToBottom(chatHistory);
@@ -414,7 +184,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="audit-entry error mb-2">
                     <small class="text-muted">${timestamp}</small>
                     <div>Query: "${queryText}"</div>
-                    <div>Error: ${error.message || 'An unexpected error occurred'}</div>
+                    <div>Error: ${error.message}</div>
                 </div>
             `;
             scrollToBottom(auditTrail);
@@ -445,31 +215,7 @@ document.addEventListener('DOMContentLoaded', function() {
     color: var(--bs-danger);
 }
 
-.progress {
-    background-color: var(--bs-secondary-bg-subtle);
-}
-
-.progress-bar {
-    background-color: var(--bs-primary);
-    color: var(--bs-light);
-    font-size: 0.875rem;
-    line-height: 25px;
-}
-
-.progress-bar.bg-danger {
-    background-color: var(--bs-danger);
-}
-
-.upload-spinner {
-    color: var(--bs-light);
-}
-
-#chatHistory {
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-#auditTrail {
+.audit-trail-container {
     max-height: 400px;
     overflow-y: auto;
 }
@@ -502,40 +248,19 @@ document.addEventListener('DOMContentLoaded', function() {
     overflow-y: auto;
 }
 
-.alert {
+.query-details {
+    background-color: rgba(var(--bs-dark-rgb), 0.05);
+    padding: 1rem;
+    border-radius: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.query-details p {
+    margin-bottom: 0.5rem;
+}
+
+.query-details p:last-child {
     margin-bottom: 0;
-    transition: opacity 0.3s ease-in-out;
-}
-
-.alert.d-none {
-    display: none !important;
-}
-
-.alert-success {
-    background-color: rgba(var(--bs-success-rgb), 0.15);
-    color: var(--bs-emphasis-color);
-    border-color: rgba(var(--bs-success-rgb), 0.2);
-}
-
-.custom-file-input .form-control {
-    cursor: pointer;
-    background-color: rgba(var(--bs-tertiary-rgb), 0.1);
-    color: var(--bs-emphasis-color);
-    border-color: rgba(var(--bs-tertiary-rgb), 0.2);
-}
-
-.custom-file-input .form-control:hover {
-    background-color: rgba(var(--bs-tertiary-rgb), 0.15);
-}
-
-.custom-file-input .form-control.has-file {
-    background-color: rgba(var(--bs-success-rgb), 0.15);
-    color: var(--bs-emphasis-color);
-    border-color: rgba(var(--bs-success-rgb), 0.2);
-}
-
-.cursor-pointer {
-    cursor: pointer;
 }
 </style>
 {% endblock %}

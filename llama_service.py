@@ -18,12 +18,17 @@ class LlamaService:
         try:
             # Always start with a basic chat response
             chat_response = self.generate_response(query_text)
+
+            # Initialize query analysis with current timestamp
             query_analysis = {
                 'input_query': query_text,
-                'database_state': 'disconnected',
                 'query_type': 'content_search',
+                'database_state': 'disconnected',
                 'analysis_timestamp': datetime.now().isoformat(),
-                'parameters': {'query': query_text}
+                'parameters': {'query': query_text},
+                'found_matches': False,
+                'direct_matches': 0,
+                'related_matches': 0
             }
 
             # Try to enhance with graph data if available
@@ -32,55 +37,51 @@ class LlamaService:
                     self.logger.info("Attempting to query graph database")
                     query_analysis['database_state'] = 'connected'
 
-                    # Define the Cypher queries for different search strategies
-                    queries = {
-                        'content_search': """
-                        MATCH (n)
-                        WHERE n.content CONTAINS $query
-                        RETURN n.content as content
-                        LIMIT 5
-                        """,
-                        'entity_search': """
-                        MATCH (n)-[:RELATES_TO]-(m)
-                        WHERE n.content CONTAINS $query
-                        RETURN DISTINCT m.content as content
-                        LIMIT 3
-                        """
-                    }
+                    # Define the Cypher queries
+                    content_query = """
+                    MATCH (n)
+                    WHERE n.content CONTAINS $query
+                    RETURN n.content as content
+                    LIMIT 5
+                    """
+
+                    entity_query = """
+                    MATCH (n)-[:RELATES_TO]-(m)
+                    WHERE n.content CONTAINS $query
+                    RETURN DISTINCT m.content as content
+                    LIMIT 3
+                    """
 
                     # Execute primary content search
-                    results = self.graph_db.query(queries['content_search'], {'query': query_text})
+                    results = self.graph_db.query(content_query, {'query': query_text})
                     related_results = []
 
                     if results:
                         # If we found direct matches, also look for related content
                         self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
-                        related_results = self.graph_db.query(queries['entity_search'], {'query': query_text})
+                        related_results = self.graph_db.query(entity_query, {'query': query_text})
 
                         context = self._prepare_context(results + related_results)
                         if context:
                             chat_response = self.generate_response(query_text, context)
 
+                        # Update analysis with match information
                         query_analysis.update({
                             'found_matches': True,
                             'direct_matches': len(results),
-                            'related_matches': len(related_results),
-                            'executed_queries': queries
+                            'related_matches': len(related_results)
                         })
                     else:
                         self.logger.info("No direct matches found in knowledge graph")
-                        query_analysis.update({
-                            'found_matches': False,
-                            'executed_queries': queries
-                        })
 
+                    # Return complete response with technical details
                     return {
                         'response': chat_response,
                         'technical_details': {
                             'queries': {
                                 'query_analysis': query_analysis,
-                                'content_query': queries['content_search'],
-                                'entity_query': queries['entity_search'],
+                                'content_query': content_query,
+                                'entity_query': entity_query,
                                 'parameters': {'query': query_text}
                             },
                             'results': {
@@ -95,7 +96,7 @@ class LlamaService:
                     query_analysis['error'] = str(e)
                     query_analysis['status'] = 'error'
 
-            # Return basic chat response if no graph data
+            # Return basic response if no graph data available
             return {
                 'response': chat_response,
                 'technical_details': {
