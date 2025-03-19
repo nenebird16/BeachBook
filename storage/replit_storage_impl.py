@@ -27,6 +27,9 @@ class ReplitObjectStorage(ObjectStorageInterface):
     def store_file(self, file_data: bytes, file_name: str, content_type: str) -> str:
         """Store a file and return its URL"""
         try:
+            if not self.client:
+                raise RuntimeError("Storage client not initialized. Call connect() first.")
+
             # Generate a unique file path using timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_path = f"{self.bucket_name}/{timestamp}_{file_name}"
@@ -49,6 +52,8 @@ class ReplitObjectStorage(ObjectStorageInterface):
     def get_file(self, file_identifier: str) -> Optional[bytes]:
         """Retrieve a file by its identifier"""
         try:
+            if not self.client:
+                raise RuntimeError("Storage client not initialized. Call connect() first.")
             return self.client.get_bytes(file_identifier)
         except Exception as e:
             self.logger.error(f"Error retrieving file: {str(e)}")
@@ -57,6 +62,8 @@ class ReplitObjectStorage(ObjectStorageInterface):
     def delete_file(self, file_identifier: str) -> bool:
         """Delete a file by its identifier"""
         try:
+            if not self.client:
+                raise RuntimeError("Storage client not initialized. Call connect() first.")
             self.client.delete(file_identifier)
             return True
         except Exception as e:
@@ -66,6 +73,9 @@ class ReplitObjectStorage(ObjectStorageInterface):
     def list_files(self, prefix: Optional[str] = None) -> List[Dict[str, Any]]:
         """List files with optional prefix filter"""
         try:
+            if not self.client:
+                raise RuntimeError("Storage client not initialized. Call connect() first.")
+
             # Get all keys with the given prefix
             full_prefix = f"{self.bucket_name}/{prefix}" if prefix else self.bucket_name
             files = self.client.list(prefix=full_prefix)

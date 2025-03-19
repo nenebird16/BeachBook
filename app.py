@@ -16,15 +16,60 @@ app.secret_key = os.environ.get("SESSION_SECRET")
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Initialize storage services
-try:
-    logger.info("Initializing storage services...")
-    graph_db = StorageFactory.create_graph_database("neo4j")
-    object_storage = StorageFactory.create_object_storage("replit")
+# Health check endpoint
+@app.route('/health')
+def health_check():
+    """Basic health check endpoint"""
+    try:
+        # Check if storage services are initialized
+        storage_status = {
+            'graph_db': bool(app.config.get('graph_db')),
+            'object_storage': bool(app.config.get('object_storage'))
+        }
+        return jsonify({
+            'status': 'healthy',
+            'storage': storage_status
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
 
-    # Connect to storage services
-    graph_db.connect()
-    object_storage.connect()
+# Initialize storage services
+def init_storage_services():
+    """Initialize storage services with proper error handling"""
+    try:
+        logger.info("Initializing storage services...")
+
+        # Log environment variable presence (not values)
+        logger.debug("Checking environment variables...")
+        logger.debug(f"NEO4J_URI present: {bool(os.environ.get('NEO4J_URI'))}")
+        logger.debug(f"NEO4J_USER present: {bool(os.environ.get('NEO4J_USER'))}")
+        logger.debug(f"NEO4J_PASSWORD present: {bool(os.environ.get('NEO4J_PASSWORD'))}")
+
+        # Initialize graph database
+        logger.info("Initializing graph database...")
+        graph_db = StorageFactory.create_graph_database("neo4j")
+        graph_db.connect()
+        logger.info("Graph database initialized successfully")
+
+        # Initialize object storage
+        logger.info("Initializing object storage...")
+        object_storage = StorageFactory.create_object_storage("replit")
+        object_storage.connect()
+        logger.info("Object storage initialized successfully")
+
+        return graph_db, object_storage
+
+    except Exception as e:
+        logger.error(f"Failed to initialize storage services: {str(e)}")
+        raise
+
+try:
+    # Initialize storage services
+    graph_db, object_storage = init_storage_services()
 
     # Make storage services available to the app context
     app.config['graph_db'] = graph_db
@@ -33,7 +78,8 @@ try:
     logger.info("Storage services initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize storage services: {str(e)}")
-    raise
+    # Don't raise here, let the app start in a degraded state
+    # The health check endpoint will report the status
 
 # Register blueprints
 app.register_blueprint(journal_routes)

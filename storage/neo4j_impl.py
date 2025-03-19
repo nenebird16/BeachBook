@@ -10,23 +10,33 @@ logger = logging.getLogger(__name__)
 
 class Neo4jDatabase(GraphDatabaseInterface):
     """Neo4j implementation of the graph database interface"""
-    
+
     def __init__(self, uri: str, username: str, password: str):
         self.uri = uri
         self.username = username
         self.password = password
         self.graph = None
         self.logger = logging.getLogger(__name__)
-    
+
+        # Validate credentials on initialization
+        if not all([uri, username, password]):
+            raise ValueError("Neo4j credentials must be provided (URI, username, and password)")
+
+        # Validate URI format
+        try:
+            parsed_uri = urlparse(uri)
+            if not parsed_uri.scheme or not parsed_uri.netloc:
+                raise ValueError("Invalid Neo4j URI format")
+            self.logger.debug(f"URI scheme validated: {parsed_uri.scheme}")
+            self.logger.debug(f"URI host validated: {parsed_uri.netloc}")
+        except Exception as e:
+            raise ValueError(f"Invalid Neo4j URI: {str(e)}")
+
     def connect(self) -> bool:
         try:
-            if not all([self.uri, self.username, self.password]):
-                raise ValueError("Neo4j credentials not properly configured")
-
             # Parse URI for AuraDB
             uri = urlparse(self.uri)
-            self.logger.debug(f"Original URI scheme: {uri.scheme}")
-            self.logger.debug(f"Original URI netloc: {uri.netloc}")
+            self.logger.debug(f"Connecting to Neo4j - Scheme: {uri.scheme}, Host: {uri.netloc}")
 
             # Initialize direct Neo4j connection
             profile = ConnectionProfile(
@@ -38,19 +48,30 @@ class Neo4jDatabase(GraphDatabaseInterface):
                 password=self.password
             )
             self.graph = Graph(profile=profile)
-            
-            # Test connection
-            result = self.graph.run("RETURN 1 as test").data()
-            self.logger.info("Successfully connected to Neo4j database")
-            self.logger.debug(f"Test query result: {result}")
-            
-            return True
-            
+
+            # Test connection with retry
+            max_retries = 3
+            retry_count = 0
+            while retry_count < max_retries:
+                try:
+                    result = self.graph.run("RETURN 1 as test").data()
+                    self.logger.info("Successfully connected to Neo4j database")
+                    self.logger.debug(f"Test query result: {result}")
+                    return True
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count == max_retries:
+                        raise
+                    self.logger.warning(f"Connection attempt {retry_count} failed, retrying...")
+
         except Exception as e:
             self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
             raise
-    
+
     def create_node(self, label: str, properties: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.graph:
+            raise RuntimeError("Database connection not established. Call connect() first.")
+
         try:
             node = Node(label, **properties)
             self.graph.create(node)
@@ -58,9 +79,12 @@ class Neo4jDatabase(GraphDatabaseInterface):
         except Exception as e:
             self.logger.error(f"Error creating node: {str(e)}")
             raise
-    
+
     def create_relationship(self, start_node_id: int, end_node_id: int,
                           relationship_type: str, properties: Optional[Dict[str, Any]] = None) -> bool:
+        if not self.graph:
+            raise RuntimeError("Database connection not established. Call connect() first.")
+
         try:
             query = """
             MATCH (start), (end)
@@ -79,16 +103,22 @@ class Neo4jDatabase(GraphDatabaseInterface):
         except Exception as e:
             self.logger.error(f"Error creating relationship: {str(e)}")
             raise
-    
+
     def query(self, query_string: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        if not self.graph:
+            raise RuntimeError("Database connection not established. Call connect() first.")
+
         try:
             result = self.graph.run(query_string, **(params or {}))
             return result.data()
         except Exception as e:
             self.logger.error(f"Error executing query: {str(e)}")
             raise
-    
+
     def get_by_id(self, node_id: int) -> Optional[Dict[str, Any]]:
+        if not self.graph:
+            raise RuntimeError("Database connection not established. Call connect() first.")
+
         try:
             query = "MATCH (n) WHERE ID(n) = $node_id RETURN n"
             result = self.graph.run(query, node_id=node_id).data()
