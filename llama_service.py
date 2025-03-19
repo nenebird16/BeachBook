@@ -16,9 +16,6 @@ class LlamaService:
     def process_query(self, query_text: str) -> Dict:
         """Process a query using Claude and optionally Neo4j"""
         try:
-            # Always start with a basic chat response
-            chat_response = self.generate_response(query_text)
-
             # Initialize query analysis with current timestamp
             query_analysis = {
                 'input_query': query_text,
@@ -30,6 +27,9 @@ class LlamaService:
                 'direct_matches': 0,
                 'related_matches': 0
             }
+
+            # Always start with a basic chat response
+            chat_response = self.generate_response(query_text)
 
             # Try to enhance with graph data if available
             if self.graph_db:
