@@ -1,0 +1,172 @@
+<style>
+    .schedule-container-mobile {
+        width: 100%;
+        overflow: hidden;
+        border-radius: 8px;
+        margin: 0 auto;
+    }
+    .schedule-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        border: none;
+        font-weight: 400;
+        letter-spacing: -0.01em;
+        overflow: hidden;
+        font-size: 8px;
+        font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        max-width: 100vw;
+    }
+    .schedule-table th, .schedule-table td {
+        border: 1px solid rgba(49, 50, 50, 0.15);
+        padding: 3px 2px;
+        text-align: center;
+        position: relative;
+        white-space: normal;
+        line-height: 1.2;
+    }
+    .schedule-table thead th:first-child {
+        border-top-left-radius: 8px;
+    }
+    .schedule-table thead th:last-child {
+        border-top-right-radius: 8px;
+    }
+    .schedule-table tbody tr:last-child td:first-child {
+        border-bottom-left-radius: 8px;
+    }
+    .schedule-table tbody tr:last-child td:last-child {
+        border-bottom-right-radius: 8px;
+    }
+    .schedule-table thead th {
+        background-color: #313232;
+        color: #FFF7E6;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        border: none;
+        border-bottom: 1px solid #313232;
+        font-size: 7px;
+    }
+    .border-column {
+        background-color: #313232;
+        border: none !important;
+        width: 6px;
+        padding: 0 !important;
+    }
+    .border-row td {
+        background-color: #313232;
+        border: none !important;
+        height: 6px;
+        padding: 0 !important;
+    }
+    .time-column {
+        background-color: #313232;
+        color: #FFF7E6;
+        font-weight: 500;
+        border: none !important;
+        font-size: 7px;
+        width: 45px;
+    }
+    .meal-time {
+        background-color: #313232;
+        color: #FFF7E6;
+        font-weight: 500;
+        border-left: none !important;
+        border-right: none !important;
+    }
+    .film-review { background-color: #CEAB5C; color: #313232; }
+    .mens-session { background-color: #CEAB5C; color: #313232; }
+    .womens-session { background-color: #F3D591; color: #313232; }
+    .combined-session { background-color: #A68A4B; color: #FFF7E6; }
+    .games-green-mens { background-color: #8B744C; color: #FFF7E6; }
+    .games-green-womens { background-color: #A68A4B; color: #FFF7E6; }
+    .empty-cell { background-color: #FFF7E6; }
+
+    @media (max-width: 480px) {
+        .schedule-table {
+            margin: 0;
+        }
+        .schedule-table br {
+            display: none;
+        }
+        .schedule-table td span::after {
+            content: ", ";
+        }
+        .schedule-table td span:last-child::after {
+            content: "";
+        }
+    }
+</style>
+
+<div class="schedule-container-mobile">
+    <table class="schedule-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Fri 1-17</th>
+                <th>Sat 1-18</th>
+                <th>Sun 1-19</th>
+                <th>Mon 1-20</th>
+                <th class="border-column"></th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td class="time-column">8-9a</td>
+                <td class="empty-cell"></td>
+                <td class="meal-time" colspan="3">Breakfast</td>
+                <td class="border-column"></td>
+            </tr>
+            <tr>
+                <td class="time-column">10-11:30a</td>
+                <td class="empty-cell">Travel St.Pete</td>
+                <td class="mens-session"><span>Men's</span><span>Attack+Pass</span></td>
+                <td class="womens-session"><span>Women's</span><span>Defense</span></td>
+                <td class="combined-session"><span>Combined</span><span>Skills+Drills</span></td>
+                <td class="border-column"></td>
+            </tr>
+            <tr>
+                <td class="time-column">11:30-1p</td>
+                <td class="empty-cell"></td>
+                <td class="womens-session"><span>Women's</span><span>Attack+Pass</span></td>
+                <td class="mens-session"><span>Men's</span><span>Defense</span></td>
+                <td rowspan="5" class="empty-cell">Springs Floating Day</td>
+                <td class="border-column"></td>
+            </tr>
+            <tr>
+                <td class="time-column">1-2p</td>
+                <td class="meal-time" colspan="3">Lunch</td>
+                <td class="border-column"></td>
+            </tr>
+            <tr>
+                <td class="time-column">2-3:30p</td>
+                <td class="mens-session"><span>Men's</span><span>Visual</span></td>
+                <td class="womens-session"><span>Women's</span><span>Offense</span></td>
+                <td class="games-green-mens"><span>Men's</span><span>Games</span></td>
+                <td class="border-column"></td>
+            </tr>
+            <tr>
+                <td class="time-column">3:30-5p</td>
+                <td class="womens-session"><span>Women's</span><span>Visual</span></td>
+                <td class="mens-session"><span>Men's</span><span>Offense</span></td>
+                <td class="games-green-womens"><span>Women's</span><span>Games</span></td>
+                <td class="border-column"></td>
+            </tr>
+            <tr>
+                <td class="time-column">6-8p</td>
+                <td class="meal-time" colspan="3">Dinner</td>
+                <td class="border-column"></td>
+            </tr>
+            <tr>
+                <td class="time-column">8-9p</td>
+                <td class="film-review"><span>Film</span><span>Visual</span></td>
+                <td class="film-review"><span>Film</span><span>Game</span></td>
+                <td class="empty-cell"></td>
+                <td class="empty-cell"></td>
+                <td class="border-column"></td>
+            </tr>
+            <tr class="border-row">
+                <td colspan="6"></td>
+            </tr>
+        </tbody>
+    </table>
+</div>

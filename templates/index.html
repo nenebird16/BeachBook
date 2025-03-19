@@ -115,10 +115,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (stage === 'complete') {
             progressBar.classList.remove('bg-danger');
+            // Keep success state visible longer
             setTimeout(() => {
                 processingStatus.classList.add('d-none');
                 progressBar.style.width = '0%';
-            }, 2000);
+                // Reset file input after successful upload
+                document.getElementById('documentFile').value = '';
+            }, 3000);  // Increased from 2000 to 3000ms
         } else if (stage === 'error') {
             progressBar.classList.add('bg-danger');
         } else {
@@ -186,8 +189,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         `;
                         scrollToBottom(auditTrail);
 
-                        // Show success message
-                        alert('Document uploaded and processed successfully!');
+                        // Show success message immediately
+                        setTimeout(() => {
+                            alert('Document uploaded and processed successfully!');
+                        }, 100);
                     }
                 } catch (error) {
                     console.error('Error processing event:', error);
@@ -285,7 +290,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="cypher-query mb-3">
                     <h6>Query Analysis:</h6>
                     <pre><code>Entities: ${JSON.stringify(queryAnalysis.entities, null, 2)}
-Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
+                    Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
                 </div>
                 <div class="cypher-query mb-3">
                     <h6>Vector Similarity Search:</h6>
