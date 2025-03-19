@@ -40,17 +40,17 @@ def upload_audio():
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"{timestamp}_{filename}"
             filepath = os.path.join(UPLOAD_FOLDER, filename)
-            
+
             audio_file.save(filepath)
-            
+
             # Create journal entry in Neo4j
             entry = JournalEntry.create_audio_entry(filepath)
-            
+
             return jsonify({
                 'message': 'Audio uploaded successfully',
-                'entry_id': entry.id
+                'entry_id': entry['id']
             }), 200
-        
+
         return jsonify({'error': 'Invalid file type'}), 400
 
     except Exception as e:
@@ -66,13 +66,13 @@ def add_text_entry():
             return jsonify({'error': 'No text content provided'}), 400
 
         text = data['text']
-        
+
         # Create journal entry in Neo4j
         entry = JournalEntry.create_text_entry(text)
-        
+
         return jsonify({
             'message': 'Journal entry saved successfully',
-            'entry_id': entry.id
+            'entry_id': entry['id']
         }), 200
 
     except Exception as e:
