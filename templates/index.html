@@ -31,6 +31,10 @@
                         <div class="mb-3">
                             <input type="file" class="form-control" id="documentFile" accept=".txt,.pdf,.doc,.docx">
                         </div>
+                        <div id="uploadProgress" class="progress mb-3 d-none">
+                            <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div id="uploadStatus" class="alert d-none mb-3"></div>
                         <button type="submit" class="btn btn-primary">Upload</button>
                     </form>
                 </div>
@@ -72,15 +76,30 @@ document.addEventListener('DOMContentLoaded', function() {
     const auditTrail = document.getElementById('auditTrail');
     const queryInput = document.getElementById('queryText');
     const uploadForm = document.getElementById('uploadForm');
+    const progressBar = document.querySelector('#uploadProgress .progress-bar');
+    const progressContainer = document.getElementById('uploadProgress');
+    const statusContainer = document.getElementById('uploadStatus');
 
-    // Document upload handling
+    function updateUploadStatus(message, type = 'info') {
+        statusContainer.className = `alert alert-${type} mb-3`;
+        statusContainer.classList.remove('d-none');
+        statusContainer.textContent = message;
+    }
+
+    function updateProgress(percent, stage) {
+        progressContainer.classList.remove('d-none');
+        progressBar.style.width = `${percent}%`;
+        progressBar.setAttribute('aria-valuenow', percent);
+        progressBar.textContent = `${stage} (${percent}%)`;
+    }
+
     uploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         const formData = new FormData();
         const fileInput = document.getElementById('documentFile');
 
         if (fileInput.files.length === 0) {
-            alert('Please select a file to upload');
+            updateUploadStatus('Please select a file to upload', 'warning');
             return;
         }
 
@@ -88,9 +107,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Show loading state
         const submitButton = uploadForm.querySelector('button[type="submit"]');
-        const originalText = submitButton.textContent;
         submitButton.disabled = true;
-        submitButton.textContent = 'Uploading...';
+        progressContainer.classList.remove('d-none');
+        updateProgress(20, 'Starting upload');
+        updateUploadStatus('Processing document...', 'info');
 
         fetch('/upload', {
             method: 'POST',
@@ -101,17 +121,22 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.error) {
                 throw new Error(data.error);
             }
-            alert('Document uploaded successfully!');
+
+            if (data.doc_info) {
+                // Update progress based on document processing stages
+                updateProgress(100, 'Complete');
+                updateUploadStatus('Document uploaded and processed successfully!', 'success');
+            }
+
             fileInput.value = ''; // Clear the file input
         })
         .catch(error => {
             console.error('Upload error:', error);
-            alert(`Error uploading document: ${error.message}`);
+            updateUploadStatus(`Error: ${error.message}`, 'danger');
+            updateProgress(0, 'Error');
         })
         .finally(() => {
-            // Reset button state
             submitButton.disabled = false;
-            submitButton.textContent = originalText;
         });
     });
 
@@ -375,6 +400,52 @@ document.addEventListener('DOMContentLoaded', function() {
 .cypher-query-container-wide {
     max-height: 500px;
     overflow-y: auto;
+}
+
+/* Add these styles to your existing CSS */
+.progress {
+    height: 25px;
+    background-color: rgba(var(--bs-dark-rgb), 0.1);
+}
+
+.progress-bar {
+    background-color: var(--bs-primary);
+    color: var(--bs-light);
+    text-align: center;
+    line-height: 25px;
+    font-size: 0.875rem;
+    transition: width 0.3s ease;
+}
+
+.alert {
+    margin-bottom: 1rem;
+    padding: 0.75rem 1.25rem;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+}
+
+.alert-info {
+    background-color: rgba(var(--bs-info-rgb), 0.1);
+    border-color: rgba(var(--bs-info-rgb), 0.2);
+    color: var(--bs-info);
+}
+
+.alert-success {
+    background-color: rgba(var(--bs-success-rgb), 0.1);
+    border-color: rgba(var(--bs-success-rgb), 0.2);
+    color: var(--bs-success);
+}
+
+.alert-warning {
+    background-color: rgba(var(--bs-warning-rgb), 0.1);
+    border-color: rgba(var(--bs-warning-rgb), 0.2);
+    color: var(--bs-warning);
+}
+
+.alert-danger {
+    background-color: rgba(var(--bs-danger-rgb), 0.1);
+    border-color: rgba(var(--bs-danger-rgb), 0.2);
+    color: var(--bs-danger);
 }
 </style>
 {% endblock %}
