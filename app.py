@@ -6,6 +6,7 @@ from werkzeug.utils import secure_filename
 from storage.factory import StorageFactory
 from llama_service import LlamaService
 from services.semantic_processor import SemanticProcessor
+from routes.journal_routes import journal_routes
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET")
+app.register_blueprint(journal_routes)
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
