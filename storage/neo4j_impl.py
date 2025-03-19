@@ -27,20 +27,23 @@ class Neo4jDatabase(GraphDatabaseInterface):
                 self.logger.error("Missing Neo4j credentials")
                 return False
 
-            # Parse original URI for host
+            # Parse original URI for host and port
             parsed_uri = urlparse(uri)
-            self.logger.debug(f"Connecting to host: {parsed_uri.hostname}")
+            self.logger.debug(f"Parsed URI host: {parsed_uri.hostname}")
 
-            # Initialize connection with Graph
-            # For AuraDB, we need to use secure=True and routing=True
+            # For AuraDB, always use bolt protocol with SSL
+            bolt_url = f"bolt://{parsed_uri.hostname}:7687"
+            self.logger.info(f"Connecting to Neo4j using bolt URL: {bolt_url}")
+
+            # Initialize the Graph with SSL enabled
             self.graph = Graph(
-                uri,  # Use the original URI directly
+                bolt_url,
                 auth=(username, password),
-                secure=True,  # Required for AuraDB
-                routing=True  # Enable routing for clustering
+                secure=True,  # Enable SSL for AuraDB
+                verify=True   # Verify SSL certificate
             )
 
-            # Test connection
+            # Test connection with simple query
             test_result = self.graph.run("RETURN 1 as test").data()
             self.logger.debug(f"Connection test result: {test_result}")
 
@@ -53,6 +56,7 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
         except Exception as e:
             self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
+            self.logger.error(f"Error type: {type(e)}")
             return False
 
     def query(self, query_string: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
