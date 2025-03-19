@@ -16,30 +16,9 @@ app.secret_key = os.environ.get("SESSION_SECRET")
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Health check endpoint
-@app.route('/health')
-def health_check():
-    """Basic health check endpoint"""
-    try:
-        # Check if storage services are initialized
-        storage_status = {
-            'graph_db': bool(app.config.get('graph_db')),
-            'object_storage': bool(app.config.get('object_storage'))
-        }
-        return jsonify({
-            'status': 'healthy',
-            'storage': storage_status
-        })
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e)
-        }), 500
-
-# Initialize storage services
 def init_storage_services():
     """Initialize storage services with proper error handling"""
+    services = {'graph_db': None, 'object_storage': None}
     try:
         logger.info("Initializing storage services...")
 
@@ -50,36 +29,90 @@ def init_storage_services():
         logger.debug(f"NEO4J_PASSWORD present: {bool(os.environ.get('NEO4J_PASSWORD'))}")
 
         # Initialize graph database
-        logger.info("Initializing graph database...")
-        graph_db = StorageFactory.create_graph_database("neo4j")
-        graph_db.connect()
-        logger.info("Graph database initialized successfully")
+        try:
+            logger.info("Initializing graph database...")
+            graph_db = StorageFactory.create_graph_database("neo4j")
+            graph_db.connect()
+            logger.info("Graph database initialized successfully")
+            services['graph_db'] = graph_db
+        except Exception as e:
+            logger.error(f"Failed to initialize graph database: {str(e)}")
 
         # Initialize object storage
-        logger.info("Initializing object storage...")
-        object_storage = StorageFactory.create_object_storage("replit")
-        object_storage.connect()
-        logger.info("Object storage initialized successfully")
+        try:
+            logger.info("Initializing object storage...")
+            object_storage = StorageFactory.create_object_storage("replit")
+            object_storage.connect()
+            logger.info("Object storage initialized successfully")
+            services['object_storage'] = object_storage
+        except Exception as e:
+            logger.error(f"Failed to initialize object storage: {str(e)}")
 
-        return graph_db, object_storage
+        return services
 
     except Exception as e:
         logger.error(f"Failed to initialize storage services: {str(e)}")
-        raise
+        return services
 
-try:
-    # Initialize storage services
-    graph_db, object_storage = init_storage_services()
+# Initialize storage services
+services = init_storage_services()
 
-    # Make storage services available to the app context
-    app.config['graph_db'] = graph_db
-    app.config['object_storage'] = object_storage
+# Make storage services available to the app context
+app.config['graph_db'] = services.get('graph_db')
+app.config['object_storage'] = services.get('object_storage')
 
-    logger.info("Storage services initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize storage services: {str(e)}")
-    # Don't raise here, let the app start in a degraded state
-    # The health check endpoint will report the status
+if not any(services.values()):
+    logger.warning("No storage services were initialized successfully")
+else:
+    logger.info("Some storage services initialized successfully")
+
+# Health check endpoint
+@app.route('/health')
+def health_check():
+    """Basic health check endpoint"""
+    try:
+        # Check each storage service
+        storage_status = {
+            'graph_db': {
+                'available': bool(app.config.get('graph_db')),
+                'connected': False
+            },
+            'object_storage': {
+                'available': bool(app.config.get('object_storage')),
+                'connected': False
+            }
+        }
+
+        # Test graph database connection if available
+        if storage_status['graph_db']['available']:
+            try:
+                app.config['graph_db'].query("RETURN 1 as test")
+                storage_status['graph_db']['connected'] = True
+            except Exception as e:
+                logger.error(f"Graph database connection test failed: {str(e)}")
+
+        # Test object storage connection if available
+        if storage_status['object_storage']['available']:
+            try:
+                app.config['object_storage'].list_files()
+                storage_status['object_storage']['connected'] = True
+            except Exception as e:
+                logger.error(f"Object storage connection test failed: {str(e)}")
+
+        # Determine overall health status
+        is_healthy = any(status['connected'] for status in storage_status.values())
+
+        return jsonify({
+            'status': 'healthy' if is_healthy else 'degraded',
+            'storage': storage_status
+        }), 200 if is_healthy else 503
+
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
 
 # Register blueprints
 app.register_blueprint(journal_routes)
@@ -112,8 +145,11 @@ def process_document_with_progress(file_path):
             # Process document using graph database
             doc_info = {'content': content, 'filename': filename}
             graph_db = app.config['graph_db']
-            node = graph_db.create_node('Document', doc_info)
-            logger.debug(f"Document node created: {node}")
+            if graph_db: #Check if graph_db is initialized
+                node = graph_db.create_node('Document', doc_info)
+                logger.debug(f"Document node created: {node}")
+            else:
+                logger.warning("Graph database not initialized, skipping document processing.")
 
             # Stream intermediate progress updates
             stages = [
@@ -168,18 +204,21 @@ def upload_document():
 
             # Store file in object storage
             object_storage = app.config['object_storage']
-            file_data = file.read()
-            file_url = object_storage.store_file(
-                file_data,
-                secure_filename(file.filename),
-                file.content_type
-            )
-
-            logger.info(f"File stored: {file_url}")
-            return jsonify({
-                'status': 'success',
-                'file_url': file_url
-            }), 200
+            if object_storage: #Check if object_storage is initialized
+                file_data = file.read()
+                file_url = object_storage.store_file(
+                    file_data,
+                    secure_filename(file.filename),
+                    file.content_type
+                )
+                logger.info(f"File stored: {file_url}")
+                return jsonify({
+                    'status': 'success',
+                    'file_url': file_url
+                }), 200
+            else:
+                logger.warning("Object storage not initialized, skipping file storage.")
+                return jsonify({'error': 'Object storage not available'}), 503
 
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")
@@ -194,14 +233,17 @@ def query_knowledge():
 
         # Query graph database
         graph_db = app.config['graph_db']
-        results = graph_db.query(
-            "MATCH (d:Document) WHERE d.content CONTAINS $query RETURN d",
-            {'query': query}
-        )
-
-        return jsonify({
-            'results': results
-        })
+        if graph_db: #Check if graph_db is initialized
+            results = graph_db.query(
+                "MATCH (d:Document) WHERE d.content CONTAINS $query RETURN d",
+                {'query': query}
+            )
+            return jsonify({
+                'results': results
+            })
+        else:
+            logger.warning("Graph database not initialized, skipping query.")
+            return jsonify({'error': 'Graph database not available'}), 503
 
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
