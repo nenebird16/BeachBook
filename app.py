@@ -47,6 +47,7 @@ def generate_progress_events(file):
 
         # Process document
         doc_info = doc_processor.process_document(file)
+        logger.debug(f"Document processed with info: {doc_info}")
 
         # Stream intermediate progress updates
         stages = [
@@ -67,29 +68,31 @@ def generate_progress_events(file):
         error_msg = str(e).replace('"', '\\"')  # Escape quotes for JSON
         yield f"data: {{\"stage\": \"error\", \"error\": \"{error_msg}\"}}\n\n"
 
-@app.route('/upload', methods=['POST'])
+@app.route('/upload', methods=['POST', 'GET'])
 def upload_document():
     """Handle document upload and processing with event streaming"""
     try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+        if request.method == 'GET':
+            # This is for the EventSource connection
+            return Response(
+                stream_with_context(generate_progress_events(request.files.get('file'))),
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                    'X-Accel-Buffering': 'no'
+                }
+            )
+        else:  # POST request
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file provided'}), 400
 
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'error': 'No file selected'}), 400
 
-        logger.info(f"Starting document processing for {file.filename}")
-
-        # Return SSE response with progress updates
-        return Response(
-            stream_with_context(generate_progress_events(file)),
-            mimetype='text/event-stream',
-            headers={
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'X-Accel-Buffering': 'no'
-            }
-        )
+            logger.info(f"Starting document processing for {file.filename}")
+            return jsonify({'status': 'processing'})
 
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")
