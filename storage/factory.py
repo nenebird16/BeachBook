@@ -31,12 +31,15 @@ class StorageFactory:
                 return None
 
             try:
+                logger.info("Attempting to create Neo4j database connection...")
                 db = Neo4jDatabase(
                     uri=uri,
                     username=username,
                     password=password
                 )
+                logger.info("Neo4j database instance created, attempting connection...")
                 db.connect()
+                logger.info("Successfully connected to Neo4j database")
                 return db
             except Exception as e:
                 logger.error(f"Failed to create Neo4j database: {str(e)}")

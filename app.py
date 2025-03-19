@@ -29,7 +29,17 @@ def verify_env_variables():
         logger.error(f"Missing required environment variables: {', '.join(missing)}")
         return False
 
-    logger.info("All required environment variables are present")
+    # Log the presence of variables (not their values)
+    for var_name in required_vars:
+        logger.info(f"{var_name} is present and not empty")
+
+    # For Neo4j URI, validate format
+    neo4j_uri = required_vars['NEO4J_URI']
+    if not neo4j_uri.startswith(('neo4j://', 'neo4j+s://', 'bolt://', 'bolt+s://')):
+        logger.error(f"Invalid Neo4j URI format. URI must start with neo4j://, neo4j+s://, bolt://, or bolt+s://")
+        return False
+
+    logger.info("All required environment variables are present and valid")
     return True
 
 def init_storage_services():
@@ -77,6 +87,11 @@ services = init_storage_services()
 app.config['graph_db'] = services.get('graph_db')
 app.config['object_storage'] = services.get('object_storage')
 
+if not any(services.values()):
+    logger.warning("No storage services were initialized successfully")
+else:
+    logger.info("Some storage services initialized successfully")
+
 # Health check endpoint
 @app.route('/health')
 def health_check():
@@ -94,6 +109,13 @@ def health_check():
                 'connected': False,
                 'error': None
             }
+        }
+
+        # Check environment variables
+        env_vars = {
+            'NEO4J_URI': bool(os.environ.get('NEO4J_URI')),
+            'NEO4J_USER': bool(os.environ.get('NEO4J_USER')),
+            'NEO4J_PASSWORD': bool(os.environ.get('NEO4J_PASSWORD'))
         }
 
         # Test graph database connection if available
@@ -116,20 +138,14 @@ def health_check():
                 logger.error(f"Object storage connection test failed: {error_msg}")
                 storage_status['object_storage']['error'] = error_msg
 
-        # Check environment variables
-        env_vars = {
-            'NEO4J_URI': bool(os.environ.get('NEO4J_URI')),
-            'NEO4J_USER': bool(os.environ.get('NEO4J_USER')),
-            'NEO4J_PASSWORD': bool(os.environ.get('NEO4J_PASSWORD'))
-        }
-
         # Determine overall health status
         is_healthy = any(status['connected'] for status in storage_status.values())
 
         return jsonify({
             'status': 'healthy' if is_healthy else 'degraded',
             'environment': env_vars,
-            'storage': storage_status
+            'storage': storage_status,
+            'uri_format': os.environ.get('NEO4J_URI', '').startswith(('neo4j://', 'neo4j+s://', 'bolt://', 'bolt+s://'))
         }), 200 if is_healthy else 503
 
     except Exception as e:
@@ -145,134 +161,6 @@ app.register_blueprint(journal_routes)
 @app.route('/')
 def index():
     return render_template('index.html')
-
-def process_document_with_progress(file_path):
-    """Process document and yield progress events"""
-    try:
-        # Initial upload stage
-        yield "data: {\"stage\": \"uploading\", \"progress\": 20}\n\n"
-
-        # Open and process the file
-        with open(file_path, 'r') as file:
-            content = file.read()
-
-            class FileWrapper:
-                def __init__(self, content, filename):
-                    self.content = content
-                    self.filename = filename
-
-                def read(self):
-                    return self.content.encode('utf-8')
-
-            filename = os.path.basename(file_path)
-            file_obj = FileWrapper(content, filename)
-
-            # Process document using graph database
-            doc_info = {'content': content, 'filename': filename}
-            graph_db = app.config['graph_db']
-            if graph_db: #Check if graph_db is initialized
-                node = graph_db.create_node('Document', doc_info)
-                logger.debug(f"Document node created: {node}")
-            else:
-                logger.warning("Graph database not initialized, skipping document processing.")
-
-            # Stream intermediate progress updates
-            stages = [
-                ('extracting', 40),
-                ('processing', 60),
-                ('analyzing', 80),
-                ('storing', 90)
-            ]
-
-            for stage, progress in stages:
-                yield f"data: {{\"stage\": \"{stage}\", \"progress\": {progress}}}\n\n"
-
-            yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
-
-    except Exception as e:
-        logger.error(f"Error during document processing: {str(e)}")
-        error_msg = str(e).replace('"', '\\"')  # Escape quotes for JSON
-        yield f"data: {{\"stage\": \"error\", \"error\": \"{error_msg}\"}}\n\n"
-
-@app.route('/upload', methods=['POST', 'GET'])
-def upload_document():
-    """Handle document upload and processing with event streaming"""
-    try:
-        if request.method == 'GET':
-            filename = request.args.get('filename')
-            if not filename:
-                return jsonify({'error': 'No filename provided'}), 400
-
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(filename))
-
-            if not os.path.exists(file_path):
-                return jsonify({'error': 'File not found'}), 404
-
-            return Response(
-                stream_with_context(process_document_with_progress(file_path)),
-                mimetype='text/event-stream',
-                headers={
-                    'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive',
-                    'X-Accel-Buffering': 'no',
-                    'Content-Type': 'text/event-stream',
-                    'X-Content-Type-Options': 'nosniff'
-                }
-            )
-        else:  # POST request
-            if 'file' not in request.files:
-                return jsonify({'error': 'No file provided'}), 400
-
-            file = request.files['file']
-            if file.filename == '':
-                return jsonify({'error': 'No file selected'}), 400
-
-            # Store file in object storage
-            object_storage = app.config['object_storage']
-            if object_storage: #Check if object_storage is initialized
-                file_data = file.read()
-                file_url = object_storage.store_file(
-                    file_data,
-                    secure_filename(file.filename),
-                    file.content_type
-                )
-                logger.info(f"File stored: {file_url}")
-                return jsonify({
-                    'status': 'success',
-                    'file_url': file_url
-                }), 200
-            else:
-                logger.warning("Object storage not initialized, skipping file storage.")
-                return jsonify({'error': 'Object storage not available'}), 503
-
-    except Exception as e:
-        logger.error(f"Error processing document: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/query', methods=['POST'])
-def query_knowledge():
-    try:
-        query = request.json.get('query')
-        if not query:
-            return jsonify({'error': 'No query provided'}), 400
-
-        # Query graph database
-        graph_db = app.config['graph_db']
-        if graph_db: #Check if graph_db is initialized
-            results = graph_db.query(
-                "MATCH (d:Document) WHERE d.content CONTAINS $query RETURN d",
-                {'query': query}
-            )
-            return jsonify({
-                'results': results
-            })
-        else:
-            logger.warning("Graph database not initialized, skipping query.")
-            return jsonify({'error': 'Graph database not available'}), 503
-
-    except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
