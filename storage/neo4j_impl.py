@@ -24,7 +24,10 @@ class Neo4jDatabase(GraphDatabaseInterface):
             password = os.environ.get("NEO4J_PASSWORD")
 
             if not all([uri, username, password]):
-                self.logger.error("Missing Neo4j credentials")
+                self.logger.error("Missing Neo4j credentials:")
+                self.logger.error(f"URI present: {'Yes' if uri else 'No'}")
+                self.logger.error(f"Username present: {'Yes' if username else 'No'}")
+                self.logger.error(f"Password present: {'Yes' if password else 'No'}")
                 return False
 
             # Parse URI for connection details
@@ -34,21 +37,13 @@ class Neo4jDatabase(GraphDatabaseInterface):
             self.logger.debug(f"Host: {parsed_uri.hostname}")
             self.logger.debug(f"Port: {parsed_uri.port or 7687}")
 
-            # Map Neo4j protocols to bolt protocols
-            protocol_mapping = {
-                'neo4j': 'bolt',
-                'neo4j+s': 'bolt+s',
-                'neo4j+ssc': 'bolt+ssc'
-            }
-
-            # Convert protocol if needed, defaulting to original if not in mapping
-            if parsed_uri.scheme in protocol_mapping:
-                scheme = protocol_mapping[parsed_uri.scheme]
-                connection_uri = f"{scheme}://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
+            # Handle AuraDB connections (neo4j+s scheme)
+            if parsed_uri.scheme == 'neo4j+s':
+                connection_uri = f"bolt+s://{parsed_uri.netloc}"
+                self.logger.info(f"Using AuraDB connection format: {connection_uri}")
             else:
                 connection_uri = uri
-
-            self.logger.info(f"Connecting using URI: {connection_uri}")
+                self.logger.info(f"Using standard connection format: {connection_uri}")
 
             # Create the driver instance
             self.driver = GraphDatabase.driver(
