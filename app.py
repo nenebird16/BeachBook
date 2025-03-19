@@ -3,6 +3,7 @@ import logging
 import config  # Import config first to load environment variables
 from flask import Flask, request, render_template, jsonify, Response, stream_with_context
 from werkzeug.utils import secure_filename
+from routes.journal_routes import journal_routes
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -35,6 +36,9 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize services: {str(e)}")
     raise
+
+# Register blueprints
+app.register_blueprint(journal_routes)
 
 @app.route('/')
 def index():

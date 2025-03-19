@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- Left Column: Journal Input -->
+        <div class="col-md-8">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Volleyball Journal</h5>
+                </div>
+                <div class="card-body d-flex flex-column">
+                    <!-- Text Journal Input -->
+                    <div class="mb-4">
+                        <h6>Write Journal Entry</h6>
+                        <textarea class="form-control" id="journalText" rows="4" 
+                                placeholder="Write about your volleyball practice, game, or learning experience..."></textarea>
+                    </div>
+
+                    <!-- Audio Recording Section -->
+                    <div class="mb-4">
+                        <h6>Record Journal Entry</h6>
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            <button id="recordButton" class="btn btn-primary">
+                                <i class="fas fa-microphone"></i> Start Recording
+                            </button>
+                            <div id="recordingStatus" class="text-muted d-none">
+                                Recording... <span id="recordingTime">0:00</span>
+                            </div>
+                        </div>
+                        <div id="audioPreview" class="d-none">
+                            <audio id="recordedAudio" controls class="w-100 mb-2"></audio>
+                            <button id="saveRecording" class="btn btn-success">
+                                Save Recording
+                            </button>
+                            <button id="discardRecording" class="btn btn-outline-danger">
+                                Discard
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="mt-auto">
+                        <button id="submitJournal" class="btn btn-primary">
+                            Submit Journal Entry
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Journal History -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Journal History</h5>
+                </div>
+                <div class="card-body">
+                    <div id="journalHistory" class="journal-history-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let mediaRecorder;
+    let audioChunks = [];
+    let recordingInterval;
+    let recordingSeconds = 0;
+    
+    const recordButton = document.getElementById('recordButton');
+    const recordingStatus = document.getElementById('recordingStatus');
+    const recordingTime = document.getElementById('recordingTime');
+    const audioPreview = document.getElementById('audioPreview');
+    const recordedAudio = document.getElementById('recordedAudio');
+    const saveRecording = document.getElementById('saveRecording');
+    const discardRecording = document.getElementById('discardRecording');
+    const submitJournal = document.getElementById('submitJournal');
+    const journalText = document.getElementById('journalText');
+    const journalHistory = document.getElementById('journalHistory');
+
+    // Audio Recording Functions
+    async function startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = (event) => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                recordedAudio.src = URL.createObjectURL(audioBlob);
+                audioPreview.classList.remove('d-none');
+            };
+
+            // Start recording
+            mediaRecorder.start();
+            recordingStatus.classList.remove('d-none');
+            recordButton.innerHTML = '<i class="fas fa-stop"></i> Stop Recording';
+            recordButton.classList.replace('btn-primary', 'btn-danger');
+            
+            // Start timer
+            recordingSeconds = 0;
+            recordingInterval = setInterval(updateRecordingTime, 1000);
+
+        } catch (err) {
+            console.error('Error accessing microphone:', err);
+            alert('Unable to access microphone. Please ensure you have granted permission.');
+        }
+    }
+
+    function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            clearInterval(recordingInterval);
+            
+            recordButton.innerHTML = '<i class="fas fa-microphone"></i> Start Recording';
+            recordButton.classList.replace('btn-danger', 'btn-primary');
+            recordingStatus.classList.add('d-none');
+        }
+    }
+
+    function updateRecordingTime() {
+        recordingSeconds++;
+        const minutes = Math.floor(recordingSeconds / 60);
+        const seconds = recordingSeconds % 60;
+        recordingTime.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    // Event Listeners
+    recordButton.addEventListener('click', () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    });
+
+    saveRecording.addEventListener('click', async () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.wav');
+
+        try {
+            const response = await fetch('/journal/audio', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to save recording');
+            }
+
+            const data = await response.json();
+            alert('Recording saved successfully!');
+            audioPreview.classList.add('d-none');
+            
+        } catch (err) {
+            console.error('Error saving recording:', err);
+            alert('Failed to save recording. Please try again.');
+        }
+    });
+
+    discardRecording.addEventListener('click', () => {
+        audioPreview.classList.add('d-none');
+        audioChunks = [];
+        recordedAudio.src = '';
+    });
+
+    submitJournal.addEventListener('click', async () => {
+        const text = journalText.value.trim();
+        if (!text) {
+            alert('Please enter some text for your journal entry.');
+            return;
+        }
+
+        try {
+            const response = await fetch('/journal/text', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ text })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to save journal entry');
+            }
+
+            const data = await response.json();
+            alert('Journal entry saved successfully!');
+            journalText.value = '';
+            loadJournalHistory();
+            
+        } catch (err) {
+            console.error('Error saving journal entry:', err);
+            alert('Failed to save journal entry. Please try again.');
+        }
+    });
+
+    // Load journal history
+    async function loadJournalHistory() {
+        try {
+            const response = await fetch('/journal/history');
+            if (!response.ok) {
+                throw new Error('Failed to load journal history');
+            }
+
+            const entries = await response.json();
+            journalHistory.innerHTML = entries.map(entry => `
+                <div class="journal-entry mb-3">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <small class="text-muted">${new Date(entry.timestamp).toLocaleString()}</small>
+                        <span class="badge ${entry.type === 'text' ? 'bg-primary' : 'bg-info'}">${entry.type}</span>
+                    </div>
+                    <div class="mt-2">
+                        ${entry.type === 'text' ? 
+                            entry.content : 
+                            `<audio src="${entry.audio_url}" controls class="w-100"></audio>`}
+                    </div>
+                </div>
+            `).join('');
+            
+        } catch (err) {
+            console.error('Error loading journal history:', err);
+        }
+    }
+
+    // Initial load
+    loadJournalHistory();
+});
+</script>
+
+<style>
+.journal-history-container {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.journal-entry {
+    background-color: rgba(var(--bs-tertiary-rgb), 0.2);
+    color: var(--bs-emphasis-color);
+    padding: 1rem;
+    border-radius: 0.25rem;
+}
+
+.journal-entry audio {
+    margin-top: 0.5rem;
+}
+
+#recordingStatus {
+    color: var(--bs-danger);
+}
+
+#audioPreview {
+    background-color: rgba(var(--bs-dark-rgb), 0.15);
+    padding: 1rem;
+    border-radius: 0.25rem;
+}
+</style>
+{% endblock %}
