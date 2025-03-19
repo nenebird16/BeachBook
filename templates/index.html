@@ -318,46 +318,72 @@ document.addEventListener('DOMContentLoaded', function() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
             body: JSON.stringify({query: queryText})
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.error) {
                 throw new Error(data.error);
             }
 
+            // Display chat response
             chatHistory.innerHTML += `
                 <div class="chat-message bot-message mb-2">
-                    <strong>Bot:</strong> ${data.response}
+                    <strong>Bot:</strong> ${data.response || data.chat_response || 'No response available'}
                 </div>
             `;
             scrollToBottom(chatHistory);
 
-            const queryAnalysis = data.technical_details.queries.query_analysis;
-            let queryContent = `
-                <div class="cypher-query mb-3">
-                    <h6>Query Analysis:</h6>
-                    <pre><code>Entities: ${JSON.stringify(queryAnalysis.entities, null, 2)}
-                    Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
-                </div>
-                <div class="cypher-query mb-3">
-                    <h6>Vector Similarity Search:</h6>
-                    <pre><code>${data.technical_details.queries.vector_query}</code></pre>
-                </div>
-                <div class="cypher-query mb-3">
-                    <h6>Content-Based Search:</h6>
-                    <pre><code>${data.technical_details.queries.content_query}</code></pre>
-                </div>
-                <div class="cypher-query">
-                    <h6>Entity-Based Expansion:</h6>
-                    <pre><code>${data.technical_details.queries.entity_query}</code></pre>
-                </div>
-            `;
-            cypherQueries.innerHTML = queryContent;
-            scrollToBottom(cypherQueries);
+            // Only try to display technical details if they exist
+            if (data.technical_details && data.technical_details.queries) {
+                const queryAnalysis = data.technical_details.queries.query_analysis || {};
+                let queryContent = `
+                    <div class="cypher-query mb-3">
+                        <h6>Query Analysis:</h6>
+                        <pre><code>${JSON.stringify(queryAnalysis, null, 2)}</code></pre>
+                    </div>
+                `;
 
-            const hasMatches = data.technical_details.results !== "No matches found in knowledge graph";
+                if (data.technical_details.queries.vector_query) {
+                    queryContent += `
+                        <div class="cypher-query mb-3">
+                            <h6>Vector Similarity Search:</h6>
+                            <pre><code>${data.technical_details.queries.vector_query}</code></pre>
+                        </div>
+                    `;
+                }
+
+                if (data.technical_details.queries.content_query) {
+                    queryContent += `
+                        <div class="cypher-query mb-3">
+                            <h6>Content-Based Search:</h6>
+                            <pre><code>${data.technical_details.queries.content_query}</code></pre>
+                        </div>
+                    `;
+                }
+
+                if (data.technical_details.queries.entity_query) {
+                    queryContent += `
+                        <div class="cypher-query">
+                            <h6>Entity-Based Expansion:</h6>
+                            <pre><code>${data.technical_details.queries.entity_query}</code></pre>
+                        </div>
+                    `;
+                }
+
+                cypherQueries.innerHTML = queryContent;
+                scrollToBottom(cypherQueries);
+            }
+
+            // Add to audit trail
+            const hasMatches = data.technical_details && data.technical_details.results !== "No matches found in knowledge graph";
             const timestamp = new Date().toLocaleTimeString();
             auditTrail.innerHTML += `
                 <div class="audit-entry mb-2">
@@ -374,10 +400,21 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => {
             chatHistory.innerHTML += `
                 <div class="chat-message error-message mb-2">
-                    <strong>Error:</strong> ${error.message}
+                    <strong>Error:</strong> ${error.message || 'An unexpected error occurred'}
                 </div>
             `;
             scrollToBottom(chatHistory);
+
+            // Add error to audit trail
+            const timestamp = new Date().toLocaleTimeString();
+            auditTrail.innerHTML += `
+                <div class="audit-entry error mb-2">
+                    <small class="text-muted">${timestamp}</small>
+                    <div>Query: "${queryText}"</div>
+                    <div>Error: ${error.message || 'An unexpected error occurred'}</div>
+                </div>
+            `;
+            scrollToBottom(auditTrail);
         });
     }
 });

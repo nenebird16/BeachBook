@@ -162,5 +162,57 @@ app.register_blueprint(journal_routes)
 def index():
     return render_template('index.html')
 
+@app.route('/query', methods=['POST'])
+def query_knowledge():
+    """Handle knowledge graph queries"""
+    try:
+        if not request.is_json:
+            return jsonify({
+                'error': 'Request must be JSON',
+                'chat_response': 'Sorry, there was an error processing your request.'
+            }), 400
+
+        query = request.json.get('query')
+        if not query:
+            return jsonify({
+                'error': 'No query provided',
+                'chat_response': 'Please provide a question to answer.'
+            }), 400
+
+        # Check if graph database is available
+        if not app.config.get('graph_db'):
+            return jsonify({
+                'error': 'Graph database not available',
+                'chat_response': 'I apologize, but the knowledge graph is currently unavailable. Please try again later.'
+            }), 503
+
+        try:
+            # Initialize LlamaService for processing queries
+            llama_service = LlamaService()
+            response = llama_service.process_query(query)
+
+            return jsonify({
+                'response': response.get('chat_response', 'No response generated'),
+                'technical_details': {
+                    'queries': response.get('queries', {}),
+                    'results': response.get('results', 'No matches found in knowledge graph')
+                }
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error processing query with LlamaService: {str(e)}")
+            return jsonify({
+                'error': 'Failed to process query',
+                'chat_response': 'I encountered an error while processing your question. Please try again.'
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error in query endpoint: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'chat_response': 'An unexpected error occurred. Please try again.'
+        }), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
