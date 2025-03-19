@@ -18,9 +18,6 @@ class LlamaService:
     def process_query(self, query_text: str) -> Dict:
         """Process a query using Claude and optionally Neo4j"""
         try:
-            # Get current timestamp for all events
-            current_time = datetime.now().isoformat()
-
             # Extract entities from query
             query_entities = self.semantic_processor.extract_entities_from_query(query_text)
             self.logger.info(f"Extracted entities from query: {query_entities}")
@@ -33,7 +30,7 @@ class LlamaService:
             # Create case-insensitive pattern for each term
             search_patterns = [f"(?i).*{term}.*" for term in search_terms]
 
-            # Define the base queries that will always be included in response
+            # Always define base queries for searching
             content_query = """
             MATCH (n:Player)
             WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
@@ -55,62 +52,60 @@ class LlamaService:
             LIMIT 3
             """
 
-            # Initialize query analysis
-            query_analysis = {
-                'input_query': query_text,
-                'query_type': 'volleyball_knowledge_search',
-                'database_state': 'connected' if self.graph_db else 'disconnected',
-                'analysis_timestamp': current_time,
-                'parameters': {'search_patterns': search_patterns},
-                'found_matches': False,
-                'direct_matches': 0,
-                'related_matches': 0,
-                'entities_found': query_entities
-            }
-
             # Generate base chat response
             chat_response = self.generate_response(query_text)
+
+            # Initialize technical details
+            technical_details = {
+                'queries': {
+                    'content_query': content_query,
+                    'entity_query': entity_query,
+                    'parameters': {'search_patterns': search_patterns},
+                    'query_analysis': {
+                        'input_query': query_text,
+                        'query_type': 'volleyball_knowledge_search',
+                        'database_state': 'connected' if self.graph_db else 'disconnected',
+                        'analysis_timestamp': datetime.now().isoformat(),
+                        'found_matches': False,
+                        'direct_matches': 0,
+                        'related_matches': 0,
+                        'entities_found': query_entities
+                    }
+                }
+            }
 
             # Try to query graph database if available
             if self.graph_db:
                 try:
                     self.logger.info("Attempting to query graph database")
+
+                    # Execute queries
                     results = self.graph_db.query(content_query, {'search_patterns': search_patterns})
 
                     if results:
-                        # If we found direct matches, look for related content
                         self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
                         related_results = self.graph_db.query(entity_query, {'search_patterns': search_patterns})
 
-                        # Prepare context from results
+                        # Update context and response if matches found
                         context = self._prepare_context(results + related_results)
                         if context:
                             chat_response = self.generate_response(query_text, context)
 
-                        query_analysis.update({
+                        # Update analysis with match information
+                        technical_details['queries']['query_analysis'].update({
                             'found_matches': True,
                             'direct_matches': len(results),
                             'related_matches': len(related_results)
                         })
-                    else:
-                        self.logger.info("No direct matches found in knowledge graph")
 
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
-                    query_analysis['error'] = str(e)
-                    query_analysis['database_state'] = 'error'
+                    technical_details['queries']['query_analysis']['database_state'] = 'error'
+                    technical_details['queries']['query_analysis']['error'] = str(e)
 
-            # Always return both the chat response and technical details including queries
             return {
                 'response': chat_response,
-                'technical_details': {
-                    'queries': {
-                        'query_analysis': query_analysis,
-                        'content_query': content_query,
-                        'entity_query': entity_query,
-                        'parameters': {'search_patterns': search_patterns}
-                    }
-                }
+                'technical_details': technical_details
             }
 
         except Exception as e:

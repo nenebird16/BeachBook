@@ -27,7 +27,7 @@ class Neo4jDatabase(GraphDatabaseInterface):
                 self.logger.error("Missing Neo4j credentials")
                 return False
 
-            # Parse and log URI components for debugging
+            # Parse URI components for debugging
             parsed_uri = urlparse(uri)
             self.logger.debug("Connecting to Neo4j database:")
             self.logger.debug(f"Original URI: {uri}")
@@ -37,19 +37,19 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
             # Convert neo4j+s protocol to bolt+s for AuraDB
             if parsed_uri.scheme == 'neo4j+s':
-                bolt_url = f"bolt+s://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
+                connection_uri = f"bolt+s://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
             elif parsed_uri.scheme == 'neo4j':
-                bolt_url = f"bolt://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
+                connection_uri = f"bolt://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
             else:
-                bolt_url = uri
+                connection_uri = uri
 
-            self.logger.info(f"Using bolt URL: {bolt_url}")
+            self.logger.info(f"Using connection URI: {connection_uri}")
 
             # Initialize the Graph with appropriate settings
             self.graph = Graph(
-                bolt_url,
+                connection_uri,
                 auth=(username, password),
-                secure=True if '+s' in parsed_uri.scheme else False
+                name="neo4j"  # Default database name for AuraDB
             )
 
             # Test connection
