@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
 from services.semantic_processor import SemanticProcessor
-import json
 from services.query_templates import QueryTemplates
 from typing import Dict
 
@@ -52,60 +51,35 @@ class LlamaService:
             )
             self.logger.info("Successfully initialized Neo4j graph store")
 
-            # Create vector index if it doesn't exist
-            self._ensure_vector_index()
-
         except Exception as e:
             self.logger.error(f"Failed to initialize Neo4j connections: {str(e)}")
             raise
 
-    def _ensure_vector_index(self):
-        """Create vector index for semantic search if it doesn't exist"""
-        try:
-            # Check if index exists
-            index_query = """
-            SHOW INDEXES
-            YIELD name, type
-            WHERE name = 'document_embeddings'
-            """
-            result = list(self.graph.run(index_query))
-
-            if not result:
-                # Create vector index
-                create_index = """
-                CALL db.index.vector.createNodeIndex(
-                    'document_embeddings',
-                    'Document',
-                    'embedding',
-                    1536,
-                    'cosine'
-                )
-                """
-                self.graph.run(create_index)
-                self.logger.info("Created vector index for document embeddings")
-            else:
-                self.logger.info("Vector index already exists")
-
-        except Exception as e:
-            self.logger.error(f"Error ensuring vector index: {str(e)}")
-            raise
-
-    def process_document(self, content):
+    def process_document(self, content: str) -> bool:
         """Process document content for storage"""
         try:
             self.logger.info("Processing document for storage")
-            # Process document with semantic processor
-            doc_info = self.semantic_processor.process_document(content)
 
-            # Store embeddings in Neo4j
-            if doc_info and 'embeddings' in doc_info:
-                for chunk in doc_info['embeddings']:
-                    query = """
-                    MATCH (d:Document {content: $content})
-                    SET d.embedding = $embedding
-                    """
-                    self.graph.run(query, content=chunk['text'], 
-                                embedding=chunk['embedding'])
+            # Process document with semantic processor
+            semantic_data = self.semantic_processor.process_document(content)
+
+            # Store embeddings in Neo4j if available
+            if semantic_data and 'embeddings' in semantic_data:
+                for chunk in semantic_data['embeddings']:
+                    try:
+                        # We'll match on a substring of the content to avoid length issues
+                        content_preview = chunk['text'][:200] if len(chunk['text']) > 200 else chunk['text']
+                        query = """
+                        MATCH (d:Document)
+                        WHERE d.content CONTAINS $content_preview
+                        SET d.embedding = $embedding
+                        """
+                        self.graph.run(query, 
+                                     content_preview=content_preview,
+                                     embedding=chunk['embedding'])
+                    except Exception as e:
+                        self.logger.error(f"Error storing embedding: {str(e)}")
+                        continue
 
             return True
 
@@ -113,7 +87,7 @@ class LlamaService:
             self.logger.error(f"Error processing document: {str(e)}")
             raise
 
-    def generate_response(self, query, context_info=None):
+    def generate_response(self, query: str, context_info: str = None) -> str:
         """Generate a natural language response using Claude"""
         try:
             if context_info:
@@ -132,7 +106,7 @@ class LlamaService:
             else:
                 # Check if this is a query about graph contents
                 is_content_query = any(keyword in query.lower() 
-                                        for keyword in ['what', 'tell me about', 'show me', 'list', 'topics'])
+                                    for keyword in ['what', 'tell me about', 'show me', 'list', 'topics'])
 
                 if is_content_query:
                     # Get graph overview
@@ -189,7 +163,7 @@ class LlamaService:
             self.logger.error(f"Error generating Claude response: {str(e)}")
             return None
 
-    def _get_graph_overview(self):
+    def _get_graph_overview(self) -> str:
         """Get an overview of entities and topics in the graph"""
         try:
             # Get all entity types and their instances
@@ -253,7 +227,7 @@ class LlamaService:
             self.logger.error(f"Error getting graph overview: {str(e)}")
             return None
 
-    def process_query(self, query_text):
+    def process_query(self, query_text: str) -> Dict:
         """Process a query using hybrid search"""
         try:
             self.logger.info(f"Processing query: {query_text}")
@@ -326,18 +300,17 @@ class LlamaService:
             if unique_results:
                 context_sections = []
                 for result in unique_results[:5]:  # Top 5 unique results
-                    context_sections.append(f"- Document: {result['title']}")
-                    context_sections.append(f"  Content: {result['content'][:500]}")
+                    context_sections.append(f"Document: {result['title']}")
+                    context_sections.append(f"Content: {result['content'][:500]}")
                     if result.get('entities'):
                         context_sections.append(
-                            f"  Related concepts: {', '.join(result['entities'])}")
+                            f"Related concepts: {', '.join(result['entities'])}")
                     context_sections.append("")
                 context_info = "\n".join(context_sections)
 
-            # Generate AI response (with or without context)
+            # Generate AI response
             ai_response = self.generate_response(query_text, context_info)
 
-            # Return structured response
             return {
                 'chat_response': ai_response,
                 'queries': {
@@ -354,20 +327,18 @@ class LlamaService:
             self.logger.error(f"Query text was: {query_text}")
             raise
 
-    def get_available_queries(self):
+    def get_available_queries(self) -> Dict:
         """Get information about available query templates"""
         return self.query_templates.list_available_queries()
 
-    def execute_template_query(self, category: str, query_name: str, params: Dict = None):
+    def execute_template_query(self, category: str, query_name: str, params: Dict = None) -> list:
         """Execute a template query with parameters"""
         try:
             query = self.query_templates.get_query(category, query_name)
             if not query:
                 raise ValueError(f"Query template not found: {category}/{query_name}")
 
-            if params is None:
-                params = {}
-
+            params = params or {}
             results = self.graph.run(query, **params).data()
             return results
 
