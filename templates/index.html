@@ -53,7 +53,7 @@
                     <h5 class="card-title mb-0">Upload Document</h5>
                 </div>
                 <div class="card-body">
-                    <form id="uploadForm" class="d-flex gap-3">
+                    <form id="uploadForm" class="d-flex gap-3" novalidate>
                         <input type="file" class="form-control" id="documentFile" name="file" accept=".txt,.doc,.docx,.pdf">
                         <button type="submit" class="btn btn-primary position-relative">
                             Upload
@@ -117,11 +117,16 @@ document.addEventListener('DOMContentLoaded', function() {
             progressBar.classList.remove('bg-danger');
             // Keep success state visible longer
             setTimeout(() => {
-                processingStatus.classList.add('d-none');
-                progressBar.style.width = '0%';
-                // Reset file input after successful upload
-                document.getElementById('documentFile').value = '';
-            }, 3000);  // Increased from 2000 to 3000ms
+                progressBar.style.width = '100%';  // Ensure bar reaches 100%
+                // Show success message after progress bar is complete
+                setTimeout(() => {
+                    alert('Document uploaded and processed successfully!');
+                    processingStatus.classList.add('d-none');
+                    progressBar.style.width = '0%';
+                    // Reset file input after successful upload
+                    document.getElementById('documentFile').value = '';
+                }, 500);
+            }, 100);
         } else if (stage === 'error') {
             progressBar.classList.add('bg-danger');
         } else {
@@ -147,7 +152,11 @@ document.addEventListener('DOMContentLoaded', function() {
             // First, submit the file
             const response = await fetch('/upload', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
             });
 
             if (!response.ok) {
