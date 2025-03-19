@@ -36,19 +36,12 @@ class DocumentProcessor:
                 'timestamp': datetime.now().isoformat()
             }
 
-            # Handle different file types
+            # Extract content from file
             file_content = self._extract_file_content(file)
             doc_info['content'] = file_content
 
             # Extract metadata
             doc_info['metadata'] = self._extract_metadata(file_content)
-
-            # Process with semantic processor if available
-            if self.semantic_processor:
-                self.logger.info("Processing document with semantic processor...")
-                semantic_data = self.semantic_processor.process_document(file_content)
-                doc_info.update(semantic_data)
-                self.logger.info(f"Document processed with {len(semantic_data.get('entities', []))} entities extracted")
 
             # Process with LlamaIndex
             self.logger.info("Processing document with LlamaIndex...")
@@ -77,7 +70,9 @@ class DocumentProcessor:
         try:
             if file.filename.endswith('.txt'):
                 content = file.read()
-                return content.decode('utf-8') if isinstance(content, bytes) else str(content)
+                text_content = content.decode('utf-8') if isinstance(content, bytes) else str(content)
+                self.logger.debug(f"Extracted text content: {text_content[:100]}...")  # Log first 100 chars
+                return text_content
             elif file.filename.endswith('.csv'):
                 import pandas as pd
                 df = pd.read_csv(file)
@@ -110,6 +105,29 @@ class DocumentProcessor:
         except Exception as e:
             self.logger.error(f"Error extracting metadata: {str(e)}")
             return {}
+
+    def _create_entity_nodes(self, doc_node, entities: List[Dict]) -> None:
+        """Create entity nodes and link them to the document"""
+        for entity in entities:
+            try:
+                # Validate entity against schema
+                entity_type = entity.get('type')
+                if entity_type in self.entity_schemas:
+                    schema = self.entity_schemas[entity_type]
+
+                    # Check required fields
+                    if all(field in entity for field in schema['required']):
+                        # Create the entity and relationship to document
+                        self.graph_service.create_entity_node(entity, doc_node)
+                    else:
+                        self.logger.warning(f"Entity {entity['name']} missing required fields")
+                else:
+                    # If no schema exists, create anyway but log warning
+                    self.logger.warning(f"No schema for entity type: {entity_type}")
+                    self.graph_service.create_entity_node(entity, doc_node)
+            except Exception as e:
+                self.logger.error(f"Error creating entity node: {str(e)}")
+                continue
 
     def _extract_entities(self, content: str) -> List[Dict]:
         """Extract domain-specific entities from content"""
@@ -259,117 +277,3 @@ class DocumentProcessor:
                 }
             }
         }
-
-    def _create_entity_nodes(self, doc_node, entities: List[Dict]) -> None:
-        """Create entity nodes and link them to the document"""
-        for entity in entities:
-            # Validate entity against schema
-            entity_type = entity.get('type')
-            if entity_type in self.entity_schemas:
-                schema = self.entity_schemas[entity_type]
-
-                # Check required fields
-                if all(field in entity for field in schema['required']):
-                    # Create the entity and relationship to document
-                    self.graph_service.create_entity_node(entity, doc_node)
-                else:
-                    self.logger.warning(f"Entity {entity['name']} missing required fields")
-            else:
-                # If no schema exists, create anyway but log warning
-                self.logger.warning(f"No schema for entity type: {entity_type}")
-                self.graph_service.create_entity_node(entity, doc_node)
-
-    def _create_visual_element_nodes(self, doc_node, visual_elements: List[Dict]) -> None:
-        """Create visual element nodes and link them to the document"""
-        for element in visual_elements:
-            self.graph_service.create_visual_element_node(element, doc_node)
-
-    def _create_relationship_edges(self, relationships: List[Dict]) -> None:
-        """Create relationship edges between entities"""
-        for rel in relationships:
-            # Validate relationship against schema
-            rel_type = rel.get('relation')
-            if rel_type in self.relationship_schemas:
-                schema = self.relationship_schemas[rel_type]
-
-                # Check if source and target types are valid for this relationship
-                if rel['source_type'] in schema['source'] and rel['target_type'] in schema['target']:
-                    self.graph_service.create_relationship(
-                        source_name=rel['source'],
-                        source_type=rel['source_type'],
-                        target_name=rel['target'],
-                        target_type=rel['target_type'],
-                        rel_type=rel_type,
-                        properties={'evidence': rel.get('evidence')}
-                    )
-                else:
-                    self.logger.warning(f"Invalid source/target types for relationship: {rel}")
-            else:
-                self.logger.warning(f"No schema for relationship type: {rel_type}")
-                self.graph_service.create_relationship(
-                    source_name=rel['source'],
-                    source_type=rel['source_type'],
-                    target_name=rel['target'],
-                    target_type=rel['target_type'],
-                    rel_type=rel_type,
-                    properties={'evidence': rel.get('evidence')}
-                )
-
-    def _extract_visual_elements(self, content: str) -> List[Dict]:
-        """Extract visual elements specifically from content"""
-        visual_terms = [
-            'ball tracking', 'peripheral vision', 'trajectory prediction',
-            'opponent reading', 'visual focus', 'depth perception',
-            'target awareness', 'spatial recognition', 'anticipation',
-            'visual scanning', 'court awareness'
-        ]
-
-        visual_elements = []
-        for term in visual_terms:
-            if term.lower() in content.lower():
-                visual_elements.append({
-                    'name': term,
-                    'type': 'VisualElement',
-                    'source': 'visual_terminology'
-                })
-
-        return visual_elements
-
-    def _extract_relationships(self, content: str, entities: List[Dict]) -> List[Dict]:
-        """Extract relationships between entities"""
-        relationship_patterns = [
-            {'source_type': 'Drill', 'relation': 'DEVELOPS', 'target_type': 'Skill'},
-            {'source_type': 'Skill', 'relation': 'REQUIRES', 'target_type': 'Skill'},
-            {'source_type': 'Drill', 'relation': 'FOCUSES_ON', 'target_type': 'VisualElement'}
-        ]
-
-        relationships = []
-        sentences = list(self.nlp(content).sents)
-
-        for sentence in sentences:
-            sentence_text = sentence.text.lower()
-
-            # Look for entity co-occurrences in the same sentence
-            entities_in_sentence = []
-            for entity in entities:
-                if entity['name'].lower() in sentence_text:
-                    entities_in_sentence.append(entity)
-
-            # If we have at least 2 entities in a sentence, check for relationships
-            if len(entities_in_sentence) >= 2:
-                for i, source_entity in enumerate(entities_in_sentence):
-                    for target_entity in entities_in_sentence[i+1:]:
-                        # Check if this pair matches any of our relationship patterns
-                        for pattern in relationship_patterns:
-                            if source_entity['type'] == pattern['source_type'] and \
-                               target_entity['type'] == pattern['target_type']:
-                                relationships.append({
-                                    'source': source_entity['name'],
-                                    'source_type': source_entity['type'],
-                                    'relation': pattern['relation'],
-                                    'target': target_entity['name'],
-                                    'target_type': target_entity['type'],
-                                    'evidence': sentence_text
-                                })
-
-        return relationships
