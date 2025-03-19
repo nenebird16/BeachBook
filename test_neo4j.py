@@ -7,43 +7,53 @@ from urllib.parse import urlparse
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-def test_neo4j_connection():
-    """Test Neo4j database connection"""
+def test_neo4j_data():
+    """Test Neo4j database connection and inspect data"""
     try:
         # Initialize Neo4j database
         db = Neo4jDatabase()
-        logger.info("Testing Neo4j connection...")
+        logger.info("Testing Neo4j connection and data...")
 
         # Try to connect
         if db.connect():
             logger.info("✓ Successfully connected to Neo4j")
 
-            # Test query execution
-            try:
-                # Run a simple test query
-                result = db.query("MATCH (n) RETURN count(n) as count")
-                logger.info(f"Total nodes in database: {result[0]['count'] if result else 0}")
+            # Check all node labels
+            labels_query = """
+            CALL db.labels() YIELD label
+            RETURN collect(label) as labels
+            """
+            labels_result = db.query(labels_query)
+            logger.info(f"Available node labels: {labels_result[0]['labels'] if labels_result else []}")
 
-                # Check for Player nodes specifically
-                player_result = db.query("""
-                    MATCH (p:Player) 
-                    RETURN count(p) as count
-                """)
-                logger.info(f"Total Player nodes: {player_result[0]['count'] if player_result else 0}")
+            # Sample nodes for each label
+            node_samples_query = """
+            MATCH (n)
+            WITH labels(n) as labels, n
+            RETURN DISTINCT 
+                labels[0] as label,
+                n.name as name,
+                keys(n) as properties
+            LIMIT 5
+            """
+            samples = db.query(node_samples_query)
+            logger.info("Sample nodes:")
+            for sample in samples:
+                logger.info(f"Label: {sample['label']}")
+                logger.info(f"Name: {sample['name']}")
+                logger.info(f"Properties: {sample['properties']}")
+                logger.info("---")
 
-                return True
+            return True
 
-            except Exception as e:
-                logger.error(f"Query execution failed: {str(e)}")
-                return False
         else:
             logger.error("Failed to connect to Neo4j")
             return False
 
     except Exception as e:
-        logger.error(f"Connection test failed: {str(e)}")
+        logger.error(f"Test failed: {str(e)}")
         logger.error(f"Error type: {type(e)}")
         return False
 
 if __name__ == "__main__":
-    test_neo4j_connection()
+    test_neo4j_data()

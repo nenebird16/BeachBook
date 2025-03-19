@@ -1,8 +1,8 @@
 import os
 import logging
+from datetime import datetime
 from typing import Dict, List, Any, Optional
 from anthropic import Anthropic
-from datetime import datetime
 from services.semantic_processor import SemanticProcessor
 
 class LlamaService:
@@ -25,26 +25,32 @@ class LlamaService:
             # Build search patterns
             search_terms = [entity['text'] for entity in query_entities]
             if not search_terms:  # If no entities found, use the whole query
-                search_terms = [query_text]
+                search_terms = [query_text.lower()]  # Convert to lowercase for case-insensitive matching
 
             # Create case-insensitive pattern for each term
             search_patterns = [f"(?i).*{term}.*" for term in search_terms]
 
-            # Always define base queries for searching
+            # Define base queries that will be included in response regardless of execution
             content_query = """
-            MATCH (n:Player)
-            WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
-               OR any(pattern IN $search_patterns WHERE n.description =~ pattern)
+            MATCH (n)
+            WHERE any(pattern IN $search_patterns WHERE 
+                  (n:Player AND (n.name =~ pattern OR n.description =~ pattern))
+                  OR (n:Skill AND n.name =~ pattern)
+                  OR (n:Technique AND n.name =~ pattern)
+            )
             WITH n
-            OPTIONAL MATCH (n)-[r]->(s:Skill)
-            RETURN n.name as name, n.description as description, 
-                   collect(distinct s.name) as skills,
-                   labels(n) as types
+            OPTIONAL MATCH (n)-[r]->(related)
+            RETURN n.name as name, 
+                   n.description as description,
+                   labels(n) as types,
+                   collect(distinct type(r)) as relationships,
+                   collect(distinct {type: type(r), target: related.name}) as related_nodes
             LIMIT 5
             """
 
+            # Query for related entities
             entity_query = """
-            MATCH (n:Player)-[r]-(m)
+            MATCH (n)-[r]-(m)
             WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
             RETURN DISTINCT type(r) as relationship,
                    m.name as related_entity,
@@ -52,10 +58,7 @@ class LlamaService:
             LIMIT 3
             """
 
-            # Generate base chat response
-            chat_response = self.generate_response(query_text)
-
-            # Initialize technical details
+            # Initialize technical details structure that will be returned
             technical_details = {
                 'queries': {
                     'content_query': content_query,
@@ -74,19 +77,24 @@ class LlamaService:
                 }
             }
 
+            # Generate base chat response
+            chat_response = self.generate_response(query_text)
+
             # Try to query graph database if available
             if self.graph_db:
                 try:
                     self.logger.info("Attempting to query graph database")
 
-                    # Execute queries
+                    # Execute content query
                     results = self.graph_db.query(content_query, {'search_patterns': search_patterns})
+                    self.logger.debug(f"Query results: {results}")
 
                     if results:
+                        # If we found direct matches, look for related content
                         self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
                         related_results = self.graph_db.query(entity_query, {'search_patterns': search_patterns})
 
-                        # Update context and response if matches found
+                        # Prepare context from results
                         context = self._prepare_context(results + related_results)
                         if context:
                             chat_response = self.generate_response(query_text, context)
@@ -97,6 +105,8 @@ class LlamaService:
                             'direct_matches': len(results),
                             'related_matches': len(related_results)
                         })
+                    else:
+                        self.logger.info("No direct matches found in knowledge graph")
 
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
@@ -122,20 +132,26 @@ class LlamaService:
 
         context_sections = []
         for result in results:
-            # Format player information
-            if 'name' in result and 'description' in result:
-                player_info = f"{result['name']}: {result['description']}"
-                if 'skills' in result and result['skills']:
-                    player_info += f"\nSkills: {', '.join(result['skills'])}"
-                context_sections.append(player_info)
-            # Format relationship information
+            if 'name' in result:
+                section = f"Name: {result['name']}"
+                if 'description' in result and result['description']:
+                    section += f"\nDescription: {result['description']}"
+                if 'types' in result:
+                    section += f"\nType: {', '.join(result['types'])}"
+                if 'relationships' in result and result['relationships']:
+                    section += f"\nRelationships: {', '.join(result['relationships'])}"
+                if 'related_nodes' in result and result['related_nodes']:
+                    related = [f"{r['target']} ({r['type']})" for r in result['related_nodes'] if r['target']]
+                    if related:
+                        section += f"\nRelated: {', '.join(related)}"
+                context_sections.append(section)
             elif 'relationship' in result and 'related_entity' in result:
-                relationship = f"Related: {result['related_entity']}"
+                section = f"Related: {result['related_entity']}"
                 if 'related_types' in result:
-                    relationship += f" (Type: {', '.join(result['related_types'])})"
-                context_sections.append(relationship)
+                    section += f" (Type: {', '.join(result['related_types'])})"
+                context_sections.append(section)
 
-        return "\n".join(context_sections) if context_sections else None
+        return "\n\n".join(context_sections) if context_sections else None
 
     def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
         """Generate a natural language response using Claude"""
