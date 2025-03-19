@@ -118,6 +118,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 processingStatus.classList.add('d-none');
                 progressBar.style.width = '0%';
             }, 2000);
+        } else if (stage === 'error') {
+            progressBar.classList.add('bg-danger');
+        } else {
+            progressBar.classList.remove('bg-danger');
         }
     }
 
@@ -231,63 +235,88 @@ Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
         // Show loading indicators
         uploadSpinner.classList.remove('d-none');
         processingStatus.classList.remove('d-none');
-
-        // Create EventSource for progress updates
-        const progressSource = new EventSource(`/upload?filename=${encodeURIComponent(file.name)}`);
-
-        // Handle progress events
-        progressSource.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-
-            if (data.error) {
-                // Handle error
-                updateProcessingStatus('error', 100);
-                progressSource.close();
-                uploadSpinner.classList.add('d-none');
-
-                // Add error to audit trail
-                auditTrail.innerHTML += `
-                    <div class="audit-entry error mb-2">
-                        <small class="text-muted">${new Date().toLocaleTimeString()}</small>
-                        <div>Upload failed: ${file.name}</div>
-                        <div>Error: ${data.error}</div>
-                    </div>
-                `;
-                scrollToBottom(auditTrail);
-                return;
-            }
-
-            // Update progress bar
-            updateProcessingStatus(data.stage, data.progress);
-
-            // If processing is complete
-            if (data.stage === 'complete') {
-                progressSource.close();
-                uploadSpinner.classList.add('d-none');
-
-                // Add success to audit trail
-                auditTrail.innerHTML += `
-                    <div class="audit-entry mb-2">
-                        <small class="text-muted">${new Date().toLocaleTimeString()}</small>
-                        <div>Uploaded: ${file.name}</div>
-                        <div>Status: Success</div>
-                    </div>
-                `;
-                scrollToBottom(auditTrail);
-            }
-        };
-
-        // Handle any errors with the EventSource connection
-        progressSource.onerror = function() {
-            progressSource.close();
-            uploadSpinner.classList.add('d-none');
-            updateProcessingStatus('error', 100);
-        };
+        progressBar.classList.remove('bg-danger');  // Reset error state
 
         // Start the actual upload
         fetch('/upload', {
             method: 'POST',
             body: formData
+        }).then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            // Create event source for progress updates
+            const progressSource = new EventSource(`/upload?filename=${encodeURIComponent(file.name)}`);
+
+            // Handle progress events
+            progressSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Progress update:', data);  // Debug log
+
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+
+                    // Update progress bar
+                    updateProcessingStatus(data.stage, data.progress);
+
+                    // If processing is complete
+                    if (data.stage === 'complete') {
+                        progressSource.close();
+                        uploadSpinner.classList.add('d-none');
+
+                        // Add success to audit trail
+                        auditTrail.innerHTML += `
+                            <div class="audit-entry mb-2">
+                                <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+                                <div>Uploaded: ${file.name}</div>
+                                <div>Status: Success</div>
+                            </div>
+                        `;
+                        scrollToBottom(auditTrail);
+                    }
+                } catch (error) {
+                    console.error('Error processing event:', error);
+                    progressSource.close();
+                    uploadSpinner.classList.add('d-none');
+                    updateProcessingStatus('error', 100);
+
+                    // Add error to audit trail
+                    auditTrail.innerHTML += `
+                        <div class="audit-entry error mb-2">
+                            <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+                            <div>Upload failed: ${file.name}</div>
+                            <div>Error: ${error.message}</div>
+                        </div>
+                    `;
+                    scrollToBottom(auditTrail);
+                }
+            };
+
+            // Handle any errors with the EventSource connection
+            progressSource.onerror = function(error) {
+                console.error('EventSource error:', error);
+                progressSource.close();
+                uploadSpinner.classList.add('d-none');
+                updateProcessingStatus('error', 100);
+            };
+
+        }).catch(error => {
+            console.error('Upload error:', error);
+            uploadSpinner.classList.add('d-none');
+            updateProcessingStatus('error', 100);
+
+            // Add error to audit trail
+            auditTrail.innerHTML += `
+                <div class="audit-entry error mb-2">
+                    <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+                    <div>Upload failed: ${file.name}</div>
+                    <div>Error: ${error.message}</div>
+                </div>
+            `;
+            scrollToBottom(auditTrail);
         });
     });
 });
@@ -326,6 +355,10 @@ Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
     color: var(--bs-light);
     font-size: 0.875rem;
     line-height: 25px;
+}
+
+.progress-bar.bg-danger {
+    background-color: var(--bs-danger);
 }
 
 .upload-spinner {

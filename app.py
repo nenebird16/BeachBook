@@ -42,21 +42,30 @@ def index():
 def generate_progress_events(file):
     """Generator function to yield progress events"""
     try:
+        # Initial upload stage
         yield "data: {\"stage\": \"uploading\", \"progress\": 20}\n\n"
 
         # Process document
         doc_info = doc_processor.process_document(file)
 
-        # Stream progress updates based on doc_info stage
-        if 'stage' in doc_info and 'progress' in doc_info:
-            yield f"data: {{\"stage\": \"{doc_info['stage']}\", \"progress\": {doc_info['progress']}}}\n\n"
+        # Stream intermediate progress updates
+        stages = [
+            ('extracting', 40),
+            ('processing', 60),
+            ('analyzing', 80),
+            ('storing', 90)
+        ]
+
+        for stage, progress in stages:
+            yield f"data: {{\"stage\": \"{stage}\", \"progress\": {progress}}}\n\n"
 
         # Send completion event
         yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
 
     except Exception as e:
         logger.error(f"Error during document processing: {str(e)}")
-        yield f"data: {{\"stage\": \"error\", \"error\": \"{str(e)}\"}}\n\n"
+        error_msg = str(e).replace('"', '\\"')  # Escape quotes for JSON
+        yield f"data: {{\"stage\": \"error\", \"error\": \"{error_msg}\"}}\n\n"
 
 @app.route('/upload', methods=['POST'])
 def upload_document():
