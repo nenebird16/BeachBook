@@ -109,7 +109,9 @@ def upload_document():
                 headers={
                     'Cache-Control': 'no-cache',
                     'Connection': 'keep-alive',
-                    'X-Accel-Buffering': 'no'
+                    'X-Accel-Buffering': 'no',
+                    'Content-Type': 'text/event-stream',
+                    'X-Content-Type-Options': 'nosniff'
                 }
             )
         else:  # POST request
@@ -129,7 +131,10 @@ def upload_document():
             file.save(file_path)
 
             logger.info(f"File saved: {file_path}")
-            return jsonify({'status': 'processing', 'filename': filename})
+            return jsonify({'status': 'processing', 'filename': filename}), 200, {
+                'Content-Type': 'application/json',
+                'X-Content-Type-Options': 'nosniff'
+            }
 
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")
