@@ -5,6 +5,7 @@ from flask import Flask, request, render_template, jsonify
 from werkzeug.utils import secure_filename
 from storage.factory import StorageFactory
 from llama_service import LlamaService
+from services.semantic_processor import SemanticProcessor
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -16,8 +17,8 @@ app.secret_key = os.environ.get("SESSION_SECRET")
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-def init_storage_services():
-    """Initialize storage services with proper error handling"""
+def init_services():
+    """Initialize all required services"""
     services = {'graph_db': None}
 
     try:
@@ -30,18 +31,27 @@ def init_storage_services():
         else:
             logger.error("Failed to initialize graph database")
 
+        # Initialize semantic processor
+        logger.info("Initializing semantic processor...")
+        services['semantic_processor'] = SemanticProcessor()
+
+        # Initialize llama service with graph db
+        logger.info("Initializing LlamaService...")
+        services['llama_service'] = LlamaService(graph_db=graph_db)
+
     except Exception as e:
-        logger.error(f"Failed to initialize storage services: {str(e)}")
+        logger.error(f"Failed to initialize services: {str(e)}")
 
     return services
 
-# Initialize storage services
-services = init_storage_services()
+# Initialize services
+services = init_services()
 
-# Make storage services available to the app context
+# Make services available to the app context
 app.config['graph_db'] = services.get('graph_db')
+app.config['semantic_processor'] = services.get('semantic_processor')
+app.config['llama_service'] = services.get('llama_service')
 
-# Configure app routes
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -63,53 +73,49 @@ def query_knowledge():
                 'response': 'Please provide a question to answer.'
             }), 400
 
-        try:
-            # Initialize LlamaService with graph database from app config
-            llama_service = LlamaService(graph_db=app.config.get('graph_db'))
-
-            # Process the query
-            result = llama_service.process_query(query)
-
-            # Log the response structure for debugging
-            logger.debug("Query result structure:")
-            logger.debug(f"Response text: {result.get('response')}")
-            logger.debug(f"Technical details: {result.get('technical_details')}")
-
-            if not result:
-                logger.error("LlamaService returned None response")
-                return jsonify({
-                    'error': 'Service error',
-                    'response': 'Sorry, I encountered an error while processing your request. Please try again.'
-                }), 500
-
-            # Format response for frontend
-            response = {
-                'response': result.get('response', 'I apologize, but I was unable to generate a response.'),
-                'technical_details': {
-                    'queries': result.get('technical_details', {}).get('queries', {})
-                }
-            }
-
-            # Log the final response being sent to frontend
-            logger.debug(f"Sending response to frontend: {response}")
-
-            return jsonify(response), 200
-
-        except Exception as e:
-            logger.error(f"Error processing query with LlamaService: {str(e)}")
+        # Process the query using LlamaService
+        llama_service = app.config.get('llama_service')
+        if not llama_service:
             return jsonify({
-                'error': 'Failed to process query',
-                'response': 'I encountered an error while processing your question. Please try again.'
+                'error': 'Service unavailable',
+                'response': 'The knowledge service is currently unavailable. Please try again later.'
+            }), 503
+
+        # Process the query
+        result = llama_service.process_query(query)
+
+        # Log the response structure for debugging
+        logger.debug("Query result structure:")
+        logger.debug(f"Response text: {result.get('response')}")
+        logger.debug(f"Technical details: {result.get('technical_details')}")
+
+        if not result:
+            logger.error("LlamaService returned None response")
+            return jsonify({
+                'error': 'Service error',
+                'response': 'Sorry, I encountered an error while processing your request. Please try again.'
             }), 500
 
+        # Format response for frontend
+        response = {
+            'response': result.get('response', 'I apologize, but I was unable to generate a response.'),
+            'technical_details': {
+                'queries': result.get('technical_details', {}).get('queries', {})
+            }
+        }
+
+        # Log the final response being sent to frontend
+        logger.debug(f"Sending response to frontend: {response}")
+
+        return jsonify(response), 200
+
     except Exception as e:
-        logger.error(f"Error in query endpoint: {str(e)}")
+        logger.error(f"Error processing query with LlamaService: {str(e)}")
         return jsonify({
-            'error': str(e),
-            'response': 'An unexpected error occurred. Please try again.'
+            'error': 'Failed to process query',
+            'response': 'I encountered an error while processing your question. Please try again.'
         }), 500
 
-# Add document upload route after existing routes
 @app.route('/upload', methods=['POST'])
 def upload_document():
     """Handle document upload"""
@@ -121,30 +127,44 @@ def upload_document():
         if file.filename == '':
             return jsonify({'error': 'No selected file'}), 400
 
-        # Initialize document processor.  Assuming necessary imports are available.
-        from services.document_processor import DocumentProcessor
-        #This assumes llama_service and semantic_processor are globally available or defined earlier.  Adjust as needed based on your project structure.
+        try:
+            # Get required services from app config
+            graph_service = app.config.get('graph_db')
+            llama_service = app.config.get('llama_service')
+            semantic_processor = app.config.get('semantic_processor')
 
-        doc_processor = DocumentProcessor(
-            graph_service=app.config.get('graph_db'),
-            llama_service=llama_service, #Potentially needs to be initialized before this function
-            semantic_processor=semantic_processor #Potentially needs to be initialized before this function
-        )
+            if not all([graph_service, llama_service, semantic_processor]):
+                logger.error("Required services not available")
+                return jsonify({'error': 'Document processing service unavailable'}), 503
 
-        # Process the document
-        result = doc_processor.process_document(file)
+            # Initialize document processor with required services
+            from services.document_processor import DocumentProcessor
+            doc_processor = DocumentProcessor(
+                graph_service=graph_service,
+                llama_service=llama_service,
+                semantic_processor=semantic_processor
+            )
 
-        if result.get('error'):
-            logger.error(f"Error processing document: {result['error']}")
-            return jsonify({'error': result['error']}), 500
+            # Process the document
+            logger.info(f"Processing document: {file.filename}")
+            result = doc_processor.process_document(file)
+            logger.info(f"Document processing result: {result}")
 
-        return jsonify({
-            'message': 'Document processed successfully',
-            'doc_info': result
-        }), 200
+            if result.get('error'):
+                logger.error(f"Error processing document: {result['error']}")
+                return jsonify({'error': result['error']}), 500
+
+            return jsonify({
+                'message': 'Document processed successfully',
+                'doc_info': result
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Error in document processing: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Document processing error: {str(e)}'}), 500
 
     except Exception as e:
-        logger.error(f"Error handling document upload: {str(e)}")
+        logger.error(f"Error handling document upload: {str(e)}", exc_info=True)
         return jsonify({'error': 'Failed to process document'}), 500
 
 if __name__ == '__main__':

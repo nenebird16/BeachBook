@@ -23,10 +23,6 @@ class DocumentProcessor:
             self.logger.error(f"Error loading spaCy model: {str(e)}")
             raise
 
-        # Schema definitions for validation
-        self.entity_schemas = self._load_entity_schemas()
-        self.relationship_schemas = self._load_relationship_schemas()
-
     def process_document(self, file) -> Dict:
         """Process uploaded document and store in knowledge graph with semantic analysis"""
         # Initialize doc_info at the start
@@ -39,8 +35,10 @@ class DocumentProcessor:
 
         try:
             # Extract file content
+            self.logger.info(f"Extracting content from file: {file.filename}")
             file_content = self._extract_file_content(file)
             doc_info['content'] = file_content
+            self.logger.debug(f"Successfully extracted content, length: {len(file_content)}")
 
             # Update progress
             doc_info['stage'] = 'processing'
@@ -48,6 +46,9 @@ class DocumentProcessor:
 
             # Create document node in Neo4j
             self.logger.info("Creating document node in Neo4j...")
+            if not self.graph_service:
+                raise ValueError("Graph service not initialized")
+
             doc_node = self.graph_service.create_document_node(doc_info)
             self.logger.info("Document node created successfully in Neo4j")
 
@@ -66,6 +67,9 @@ class DocumentProcessor:
             doc_info['progress'] = 80
 
             # Process with LlamaIndex after entity extraction
+            if not self.llama_service:
+                raise ValueError("LlamaService not initialized")
+
             self.logger.info("Processing document with LlamaIndex...")
             self.llama_service.process_document(file_content)
             self.logger.info("Document processed successfully with LlamaIndex")
@@ -76,10 +80,15 @@ class DocumentProcessor:
 
             return doc_info
 
-        except Exception as e:
-            self.logger.error(f"Error processing document: {str(e)}")
+        except ValueError as e:
+            self.logger.error(f"Initialization error: {str(e)}")
             doc_info['stage'] = 'error'
-            doc_info['error'] = str(e)
+            doc_info['error'] = f"Service initialization error: {str(e)}"
+            return doc_info
+        except Exception as e:
+            self.logger.error(f"Error processing document: {str(e)}", exc_info=True)
+            doc_info['stage'] = 'error'
+            doc_info['error'] = f"Processing error: {str(e)}"
             return doc_info
 
     def _extract_file_content(self, file) -> str:
@@ -88,15 +97,23 @@ class DocumentProcessor:
             # Handle both file-like objects and our custom FileWrapper
             if hasattr(file, 'read'):
                 content = file.read()
-                return content.decode('utf-8') if isinstance(content, bytes) else str(content)
+                content_str = content.decode('utf-8') if isinstance(content, bytes) else str(content)
+                if not content_str.strip():
+                    raise ValueError("File is empty")
+                return content_str
             elif hasattr(file, 'content'):
+                if not file.content.strip():
+                    raise ValueError("File is empty")
                 return str(file.content)
             else:
                 raise ValueError("Invalid file object provided")
 
+        except UnicodeDecodeError as e:
+            self.logger.error(f"File encoding error: {str(e)}")
+            raise ValueError("File encoding not supported. Please upload a valid text file.")
         except Exception as e:
             self.logger.error(f"Error extracting file content: {str(e)}")
-            raise
+            raise ValueError(f"Could not read file content: {str(e)}")
 
     def _extract_entities(self, content: str) -> List[Dict]:
         """Extract domain-specific entities from content"""
@@ -104,7 +121,7 @@ class DocumentProcessor:
             doc = self.nlp(content)
             entities = []
 
-            # Extract person names as Player entities
+            # Extract named entities
             for ent in doc.ents:
                 if ent.label_ == "PERSON":
                     entities.append({
@@ -119,7 +136,7 @@ class DocumentProcessor:
                         'source': 'spacy_ner'
                     })
 
-            # Extract domain entities using rule-based matching
+            # Extract domain-specific terms
             domain_terms = {
                 'Skill': [
                     'setting', 'passing', 'blocking', 'serving', 'attacking', 'digging',
@@ -145,6 +162,7 @@ class DocumentProcessor:
                             'source': 'domain_terminology'
                         })
 
+            self.logger.info(f"Extracted {len(entities)} entities from content")
             return entities
 
         except Exception as e:
@@ -153,26 +171,24 @@ class DocumentProcessor:
 
     def _create_entity_nodes(self, doc_node, entities: List[Dict]) -> None:
         """Create entity nodes and link them to the document"""
-        for entity in entities:
-            try:
-                # Validate entity against schema
-                entity_type = entity.get('type')
-                if entity_type in self.entity_schemas:
-                    schema = self.entity_schemas[entity_type]
+        try:
+            if not entities:
+                self.logger.warning("No entities found to create nodes")
+                return
 
-                    # Check required fields
-                    if all(field in entity for field in schema['required']):
-                        # Create the entity and relationship to document
-                        self.graph_service.create_entity_node(entity, doc_node)
-                    else:
-                        self.logger.warning(f"Entity {entity['name']} missing required fields")
-                else:
-                    # If no schema exists, create anyway but log warning
-                    self.logger.warning(f"No schema for entity type: {entity_type}")
+            for entity in entities:
+                try:
+                    # Create the entity and relationship to document
                     self.graph_service.create_entity_node(entity, doc_node)
-            except Exception as e:
-                self.logger.error(f"Error creating entity node: {str(e)}")
-                continue
+                except Exception as e:
+                    self.logger.error(f"Error creating entity node: {str(e)}")
+                    continue
+
+            self.logger.info(f"Successfully created {len(entities)} entity nodes")
+
+        except Exception as e:
+            self.logger.error(f"Error in entity node creation: {str(e)}")
+            raise
 
     def _load_entity_schemas(self) -> Dict[str, Dict]:
         """Load entity schemas from configuration"""
