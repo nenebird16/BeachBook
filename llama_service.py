@@ -21,16 +21,51 @@ class LlamaService:
             # Get current timestamp for all events
             current_time = datetime.now().isoformat()
 
+            # Extract entities from query
+            query_entities = self.semantic_processor.extract_entities_from_query(query_text)
+            self.logger.info(f"Extracted entities from query: {query_entities}")
+
+            # Build search patterns
+            search_terms = [entity['text'] for entity in query_entities]
+            if not search_terms:  # If no entities found, use the whole query
+                search_terms = [query_text]
+
+            # Create case-insensitive pattern for each term
+            search_patterns = [f"(?i).*{term}.*" for term in search_terms]
+
+            # Define the queries regardless of database connection
+            content_query = """
+            MATCH (n:Player)
+            WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
+               OR any(pattern IN $search_patterns WHERE n.description =~ pattern)
+            WITH n
+            OPTIONAL MATCH (n)-[r]->(s:Skill)
+            RETURN n.name as name, n.description as description, 
+                   collect(distinct s.name) as skills,
+                   labels(n) as types
+            LIMIT 5
+            """
+
+            entity_query = """
+            MATCH (n:Player)-[r]-(m)
+            WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
+            RETURN DISTINCT type(r) as relationship,
+                   m.name as related_entity,
+                   labels(m) as related_types
+            LIMIT 3
+            """
+
             # Initialize query analysis
             query_analysis = {
                 'input_query': query_text,
                 'query_type': 'volleyball_knowledge_search',
                 'database_state': 'connected' if self.graph_db else 'disconnected',
                 'analysis_timestamp': current_time,
-                'parameters': {'query': query_text},
+                'parameters': {'search_patterns': search_patterns},
                 'found_matches': False,
                 'direct_matches': 0,
-                'related_matches': 0
+                'related_matches': 0,
+                'entities_found': query_entities
             }
 
             # Generate base chat response
@@ -41,47 +76,8 @@ class LlamaService:
                 try:
                     self.logger.info("Attempting to query graph database")
 
-                    # Extract entities from query
-                    query_entities = self.semantic_processor.extract_entities_from_query(query_text)
-                    self.logger.info(f"Extracted entities from query: {query_entities}")
-
-                    # Build smarter search pattern
-                    search_terms = [entity['text'] for entity in query_entities]
-                    if not search_terms:  # If no entities found, use the whole query
-                        search_terms = [query_text]
-
-                    # Create case-insensitive pattern for each term
-                    search_patterns = [f"(?i).*{term}.*" for term in search_terms]
-
-                    # Volleyball-specific player search
-                    content_query = """
-                    MATCH (n:Player)
-                    WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
-                       OR any(pattern IN $search_patterns WHERE n.description =~ pattern)
-                    WITH n
-                    OPTIONAL MATCH (n)-[r]->(s:Skill)
-                    RETURN n.name as name, n.description as description, 
-                           collect(distinct s.name) as skills,
-                           labels(n) as types
-                    LIMIT 5
-                    """
-
-                    # Related entities query
-                    entity_query = """
-                    MATCH (n:Player)-[r]-(m)
-                    WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
-                    RETURN DISTINCT type(r) as relationship,
-                           m.name as related_entity,
-                           labels(m) as related_types
-                    LIMIT 3
-                    """
-
                     # Execute primary content search
-                    results = self.graph_db.query(
-                        content_query, 
-                        {'search_patterns': search_patterns}
-                    )
-
+                    results = self.graph_db.query(content_query, {'search_patterns': search_patterns})
                     related_results = []
 
                     if results:
@@ -101,42 +97,26 @@ class LlamaService:
                         query_analysis.update({
                             'found_matches': True,
                             'direct_matches': len(results),
-                            'related_matches': len(related_results),
-                            'entities_found': query_entities
+                            'related_matches': len(related_results)
                         })
                     else:
                         self.logger.info("No direct matches found in knowledge graph")
-
-                    # Return complete response with technical details
-                    return {
-                        'response': chat_response,
-                        'technical_details': {
-                            'queries': {
-                                'query_analysis': query_analysis,
-                                'content_query': content_query,
-                                'entity_query': entity_query,
-                                'parameters': {'search_patterns': search_patterns}
-                            },
-                            'results': {
-                                'direct_matches': results,
-                                'related_matches': related_results
-                            } if results or related_results else 'No matches found in knowledge graph'
-                        }
-                    }
 
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
                     query_analysis['error'] = str(e)
                     query_analysis['database_state'] = 'error'
 
-            # Return basic response if no graph data available
+            # Always return the queries in the response
             return {
                 'response': chat_response,
                 'technical_details': {
                     'queries': {
-                        'query_analysis': query_analysis
-                    },
-                    'results': 'No graph database available'
+                        'query_analysis': query_analysis,
+                        'content_query': content_query,
+                        'entity_query': entity_query,
+                        'parameters': {'search_patterns': search_patterns}
+                    }
                 }
             }
 

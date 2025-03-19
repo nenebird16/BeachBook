@@ -115,14 +115,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasMatches = queryAnalysis.found_matches || false;
 
             // Display technical details
+            let queryContent = '';
+
+            // Always show the queries if they exist, regardless of execution status
             if (data.technical_details && data.technical_details.queries) {
                 const queries = data.technical_details.queries;
-                let queryContent = '';
 
                 if (queries.content_query) {
                     queryContent += `
                         <div class="cypher-query mb-3">
-                            <h6>Content Search Query:</h6>
+                            <h6>Player Search Query:</h6>
                             <pre><code>${queries.content_query}</code></pre>
                         </div>
                     `;
@@ -130,15 +132,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (queries.entity_query) {
                     queryContent += `
-                        <div class="cypher-query">
-                            <h6>Entity Search Query:</h6>
+                        <div class="cypher-query mb-3">
+                            <h6>Related Entities Query:</h6>
                             <pre><code>${queries.entity_query}</code></pre>
                         </div>
                     `;
                 }
 
-                cypherQueries.innerHTML = queryContent;
+                // Show search patterns used
+                if (queries.parameters && queries.parameters.search_patterns) {
+                    queryContent += `
+                        <div class="cypher-query">
+                            <h6>Search Patterns:</h6>
+                            <pre><code>${JSON.stringify(queries.parameters.search_patterns, null, 2)}</code></pre>
+                        </div>
+                    `;
+                }
             }
+
+            cypherQueries.innerHTML = queryContent || '<div class="alert alert-info">No queries generated.</div>';
+
 
             // Add to audit trail
             const timestamp = new Date().toLocaleTimeString();
