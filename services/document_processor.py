@@ -29,15 +29,15 @@ class DocumentProcessor:
 
     def process_document(self, file) -> Dict:
         """Process uploaded document and store in knowledge graph with semantic analysis"""
-        try:
-            # Create document info
-            doc_info = {
-                'title': file.filename,
-                'timestamp': datetime.now().isoformat(),
-                'stage': 'extracting',
-                'progress': 20
-            }
+        # Initialize doc_info at the start
+        doc_info = {
+            'title': file.filename,
+            'timestamp': datetime.now().isoformat(),
+            'stage': 'extracting',
+            'progress': 20
+        }
 
+        try:
             # Extract file content
             file_content = self._extract_file_content(file)
             doc_info['content'] = file_content
@@ -80,7 +80,7 @@ class DocumentProcessor:
             self.logger.error(f"Error processing document: {str(e)}")
             doc_info['stage'] = 'error'
             doc_info['error'] = str(e)
-            raise
+            return doc_info  # Return doc_info instead of raising the exception
 
     def _extract_file_content(self, file) -> str:
         """Extract content from file based on file type"""
