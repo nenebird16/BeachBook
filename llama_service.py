@@ -3,12 +3,14 @@ import logging
 from typing import Dict, List, Any, Optional
 from anthropic import Anthropic
 from datetime import datetime
+from services.semantic_processor import SemanticProcessor
 
 class LlamaService:
     def __init__(self, graph_db=None):
         self.logger = logging.getLogger(__name__)
         self.anthropic = Anthropic()
         self.graph_db = graph_db
+        self.semantic_processor = SemanticProcessor()
 
         if not self.graph_db:
             self.logger.warning("No graph database provided, running in chat-only mode")
@@ -22,7 +24,7 @@ class LlamaService:
             # Initialize query analysis
             query_analysis = {
                 'input_query': query_text,
-                'query_type': 'knowledge_search',  # Set a default type
+                'query_type': 'volleyball_knowledge_search',
                 'database_state': 'connected' if self.graph_db else 'disconnected',
                 'analysis_timestamp': current_time,
                 'parameters': {'query': query_text},
@@ -31,7 +33,11 @@ class LlamaService:
                 'related_matches': 0
             }
 
-            # Always start with a basic chat response
+            # Process query with semantic processor
+            query_entities = self.semantic_processor.extract_entities_from_query(query_text)
+            self.logger.info(f"Extracted entities from query: {query_entities}")
+
+            # Generate base chat response
             chat_response = self.generate_response(query_text)
 
             # Try to enhance with graph data if available
@@ -39,30 +45,44 @@ class LlamaService:
                 try:
                     self.logger.info("Attempting to query graph database")
 
-                    # Define the Cypher queries
+                    # Volleyball-specific content search
                     content_query = """
                     MATCH (n)
-                    WHERE n.content CONTAINS $query
-                    RETURN n.content as content
+                    WHERE (n:Player OR n:Skill OR n:Technique OR n:DrillType)
+                    AND n.name =~ $query_pattern
+                    RETURN n.name as name, n.description as description, labels(n) as types
                     LIMIT 5
                     """
 
+                    # Related entities query
                     entity_query = """
-                    MATCH (n)-[:RELATES_TO]-(m)
-                    WHERE n.content CONTAINS $query
-                    RETURN DISTINCT m.content as content
+                    MATCH (n)-[r]-(m)
+                    WHERE (n:Player OR n:Skill OR n:Technique OR n:DrillType)
+                    AND n.name =~ $query_pattern
+                    RETURN DISTINCT type(r) as relationship, m.name as related_entity
                     LIMIT 3
                     """
 
+                    # Create case-insensitive pattern
+                    query_pattern = f"(?i).*{query_text}.*"
+
                     # Execute primary content search
-                    results = self.graph_db.query(content_query, {'query': query_text})
+                    results = self.graph_db.query(
+                        content_query, 
+                        {'query_pattern': query_pattern}
+                    )
+
                     related_results = []
 
                     if results:
-                        # If we found direct matches, also look for related content
+                        # If we found direct matches, look for related content
                         self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
-                        related_results = self.graph_db.query(entity_query, {'query': query_text})
+                        related_results = self.graph_db.query(
+                            entity_query,
+                            {'query_pattern': query_pattern}
+                        )
 
+                        # Prepare context from results
                         context = self._prepare_context(results + related_results)
                         if context:
                             chat_response = self.generate_response(query_text, context)
@@ -84,7 +104,7 @@ class LlamaService:
                                 'query_analysis': query_analysis,
                                 'content_query': content_query,
                                 'entity_query': entity_query,
-                                'parameters': {'query': query_text}
+                                'parameters': {'query_pattern': query_pattern}
                             },
                             'results': {
                                 'direct_matches': results,
@@ -123,7 +143,12 @@ class LlamaService:
 
         context_sections = []
         for result in results:
-            if 'content' in result:
+            # Format each result based on available fields
+            if 'name' in result and 'description' in result:
+                context_sections.append(f"{result['name']}: {result['description']}")
+            elif 'relationship' in result and 'related_entity' in result:
+                context_sections.append(f"Related: {result['related_entity']} ({result['relationship']})")
+            elif 'content' in result:
                 context_sections.append(result['content'])
 
         return "\n".join(context_sections) if context_sections else None
@@ -132,17 +157,17 @@ class LlamaService:
         """Generate a natural language response using Claude"""
         try:
             if context_info:
-                prompt = f"""Based on the following context about volleyball, answer this query: "{query}"
+                prompt = f"""Based on the following context about beach volleyball, answer this query: "{query}"
 
                 Context information:
                 {context_info}
 
-                Please provide a natural, conversational response that directly answers the query.
+                Please provide a natural, conversational response about beach volleyball players, skills, techniques, or training methods.
                 """
             else:
                 prompt = f"""As a volleyball knowledge assistant, help me with this query: "{query}"
 
-                Please provide a helpful response about volleyball concepts, skills, or training methods.
+                Please provide a helpful response about volleyball players, skills, techniques, or training methods.
                 """
 
             response = self.anthropic.messages.create(
@@ -152,7 +177,7 @@ class LlamaService:
                 messages=[
                     {
                         "role": "assistant",
-                        "content": "I am a volleyball knowledge assistant that helps with skills, drills, and practice planning."
+                        "content": "I am a volleyball knowledge assistant that helps with information about players, skills, techniques, and training methods."
                     },
                     {
                         "role": "user",

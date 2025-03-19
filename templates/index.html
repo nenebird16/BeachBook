@@ -117,28 +117,13 @@ document.addEventListener('DOMContentLoaded', function() {
             // Display technical details
             if (data.technical_details && data.technical_details.queries) {
                 const queries = data.technical_details.queries;
-
-                let queryContent = `
-                    <div class="cypher-query mb-3">
-                        <h6>Query Analysis:</h6>
-                        <div class="query-details">
-                            <p><strong>Query Type:</strong> ${queryAnalysis.query_type || 'Unknown'}</p>
-                            <p><strong>Database State:</strong> ${queryAnalysis.database_state || 'Unknown'}</p>
-                            <p><strong>Timestamp:</strong> ${queryAnalysis.analysis_timestamp || 'Unknown'}</p>
-                            <p><strong>Found Matches:</strong> ${hasMatches}</p>
-                            <p><strong>Direct Matches:</strong> ${queryAnalysis.direct_matches || 0}</p>
-                            <p><strong>Related Matches:</strong> ${queryAnalysis.related_matches || 0}</p>
-                        </div>
-                    </div>
-                `;
+                let queryContent = '';
 
                 if (queries.content_query) {
                     queryContent += `
                         <div class="cypher-query mb-3">
                             <h6>Content Search Query:</h6>
                             <pre><code>${queries.content_query}</code></pre>
-                            <p><strong>Parameters:</strong></p>
-                            <pre><code>${JSON.stringify(queries.parameters || {}, null, 2)}</code></pre>
                         </div>
                     `;
                 }
