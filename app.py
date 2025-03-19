@@ -5,6 +5,7 @@ from flask import Flask, request, render_template, jsonify, Response, stream_wit
 from werkzeug.utils import secure_filename
 from routes.journal_routes import journal_routes
 from storage.factory import StorageFactory
+from llama_service import LlamaService
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -181,6 +182,7 @@ def query_knowledge():
 
         # Check if graph database is available
         if not app.config.get('graph_db'):
+            logger.error("Graph database not available in app config")
             return jsonify({
                 'error': 'Graph database not available',
                 'chat_response': 'I apologize, but the knowledge graph is currently unavailable. Please try again later.'
@@ -190,6 +192,13 @@ def query_knowledge():
             # Initialize LlamaService for processing queries
             llama_service = LlamaService()
             response = llama_service.process_query(query)
+
+            if not response:
+                logger.error("LlamaService returned None response")
+                return jsonify({
+                    'error': 'Service error',
+                    'chat_response': 'Sorry, I encountered an error while processing your request. Please try again.'
+                }), 500
 
             return jsonify({
                 'response': response.get('chat_response', 'No response generated'),
@@ -212,7 +221,6 @@ def query_knowledge():
             'error': str(e),
             'chat_response': 'An unexpected error occurred. Please try again.'
         }), 500
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
