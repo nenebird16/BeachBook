@@ -67,8 +67,42 @@ class Neo4jDatabase(GraphDatabaseInterface):
         except Exception as e:
             self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
             self.logger.error(f"Error type: {type(e)}")
-            self.logger.error(f"Connection URI attempted: {connection_uri}")
+            if 'connection_uri' in locals():
+                self.logger.error(f"Connection URI attempted: {connection_uri}")
             return False
+
+    def create_document_node(self, doc_info: Dict[str, Any]) -> Any:
+        """Create a document node with its metadata"""
+        if not self.driver:
+            raise RuntimeError("Database connection not established. Call connect() first.")
+
+        try:
+            self.logger.debug(f"Creating document node with info: {doc_info}")
+            query = """
+            CREATE (d:Document {
+                title: $title,
+                content: $content,
+                timestamp: $timestamp
+            })
+            RETURN d
+            """
+            with self.driver.session() as session:
+                result = session.run(
+                    query,
+                    title=doc_info['title'],
+                    content=doc_info['content'],
+                    timestamp=doc_info['timestamp']
+                ).single()
+
+                if result and result.get('d'):
+                    self.logger.info(f"Created document node: {doc_info['title']}")
+                    return result['d']
+                else:
+                    raise Exception("Failed to create document node")
+
+        except Exception as e:
+            self.logger.error(f"Error creating document node: {str(e)}")
+            raise
 
     def query(self, query_string: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Execute a database query"""
@@ -155,4 +189,44 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
         except Exception as e:
             self.logger.error(f"Error fetching node by ID: {str(e)}")
+            raise
+
+    def create_entity_node(self, entity_info: Dict[str, Any], doc_node: Any) -> Any:
+        """Create an entity node and link it to the document"""
+        if not self.driver:
+            raise RuntimeError("Database connection not established. Call connect() first.")
+
+        try:
+            # Create entity node with the specific label based on type
+            self.logger.debug(f"Creating entity node: {entity_info}")
+
+            labels = ["Entity"]  # Base label
+            if entity_info['type'] in ['Player', 'Skill', 'Drill', 'VisualElement']:
+                labels.append(entity_info['type'])
+
+            # Create entity node and relationship to document in a single transaction
+            query = """
+            MATCH (d:Document)
+            WHERE id(d) = $doc_id
+            CREATE (e:Entity {name: $name, type: $type})
+            CREATE (d)-[r:CONTAINS]->(e)
+            RETURN e
+            """
+
+            with self.driver.session() as session:
+                result = session.run(
+                    query,
+                    doc_id=doc_node.id,
+                    name=entity_info['name'],
+                    type=entity_info['type']
+                ).single()
+
+                if result and result.get('e'):
+                    self.logger.info(f"Created entity node: {entity_info['name']} ({entity_info['type']})")
+                    return result['e']
+                else:
+                    raise Exception("Failed to create entity node")
+
+        except Exception as e:
+            self.logger.error(f"Error creating entity node: {str(e)}")
             raise
