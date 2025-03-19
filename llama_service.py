@@ -25,12 +25,12 @@ class LlamaService:
             # Build search patterns
             search_terms = [entity['text'] for entity in query_entities]
             if not search_terms:  # If no entities found, use the whole query
-                search_terms = [query_text.lower()]  # Convert to lowercase for case-insensitive matching
+                search_terms = [query_text.lower()]
 
             # Create case-insensitive pattern for each term
             search_patterns = [f"(?i).*{term}.*" for term in search_terms]
 
-            # Define base queries that will be included in response regardless of execution
+            # Define base queries for searching
             content_query = """
             MATCH (n)
             WHERE any(pattern IN $search_patterns WHERE 
@@ -48,7 +48,6 @@ class LlamaService:
             LIMIT 5
             """
 
-            # Query for related entities
             entity_query = """
             MATCH (n)-[r]-(m)
             WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
@@ -58,27 +57,32 @@ class LlamaService:
             LIMIT 3
             """
 
-            # Initialize technical details structure that will be returned
-            technical_details = {
-                'queries': {
-                    'content_query': content_query,
-                    'entity_query': entity_query,
-                    'parameters': {'search_patterns': search_patterns},
-                    'query_analysis': {
-                        'input_query': query_text,
-                        'query_type': 'volleyball_knowledge_search',
-                        'database_state': 'connected' if self.graph_db else 'disconnected',
-                        'analysis_timestamp': datetime.now().isoformat(),
-                        'found_matches': False,
-                        'direct_matches': 0,
-                        'related_matches': 0,
-                        'entities_found': query_entities
+            # Generate base chat response
+            chat_response = self.generate_response(query_text)
+
+            # Initialize response structure
+            response = {
+                'response': chat_response,
+                'technical_details': {
+                    'queries': {
+                        'content_query': content_query,
+                        'entity_query': entity_query,
+                        'parameters': {
+                            'search_patterns': search_patterns
+                        },
+                        'query_analysis': {
+                            'input_query': query_text,
+                            'query_type': 'volleyball_knowledge_search',
+                            'database_state': 'connected' if self.graph_db else 'disconnected',
+                            'analysis_timestamp': datetime.now().isoformat(),
+                            'found_matches': False,
+                            'direct_matches': 0,
+                            'related_matches': 0,
+                            'entities_found': query_entities
+                        }
                     }
                 }
             }
-
-            # Generate base chat response
-            chat_response = self.generate_response(query_text)
 
             # Try to query graph database if available
             if self.graph_db:
@@ -97,10 +101,10 @@ class LlamaService:
                         # Prepare context from results
                         context = self._prepare_context(results + related_results)
                         if context:
-                            chat_response = self.generate_response(query_text, context)
+                            response['response'] = self.generate_response(query_text, context)
 
                         # Update analysis with match information
-                        technical_details['queries']['query_analysis'].update({
+                        response['technical_details']['queries']['query_analysis'].update({
                             'found_matches': True,
                             'direct_matches': len(results),
                             'related_matches': len(related_results)
@@ -110,13 +114,10 @@ class LlamaService:
 
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
-                    technical_details['queries']['query_analysis']['database_state'] = 'error'
-                    technical_details['queries']['query_analysis']['error'] = str(e)
+                    response['technical_details']['queries']['query_analysis']['database_state'] = 'error'
+                    response['technical_details']['queries']['query_analysis']['error'] = str(e)
 
-            return {
-                'response': chat_response,
-                'technical_details': technical_details
-            }
+            return response
 
         except Exception as e:
             self.logger.error(f"Error in process_query: {str(e)}")

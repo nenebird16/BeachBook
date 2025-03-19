@@ -66,14 +66,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function updateAuditTrail(queryText, data) {
         const timestamp = formatDate(new Date());
-        const hasMatches = data.technical_details?.queries?.query_analysis?.found_matches || false;
-        const matchCount = data.technical_details?.queries?.query_analysis?.direct_matches || 0;
+        const analysis = data.technical_details?.queries?.query_analysis;
+        const hasMatches = analysis?.found_matches || false;
+        const matchCount = analysis?.direct_matches || 0;
+        const relatedCount = analysis?.related_matches || 0;
 
         auditTrail.innerHTML += `
             <div class="audit-entry mb-2">
                 <small class="text-muted">${timestamp}</small>
                 <div>Query: "${queryText}"</div>
-                <div>${hasMatches ? `Found ${matchCount} matches in knowledge graph` : 'No matches found'}</div>
+                <div>${hasMatches 
+                    ? `Found ${matchCount} direct matches and ${relatedCount} related matches` 
+                    : 'No matches found'}</div>
             </div>
         `;
         scrollToBottom(auditTrail);
@@ -82,49 +86,52 @@ document.addEventListener('DOMContentLoaded', function() {
     function displayQueries(data) {
         console.log("Displaying queries:", data); // Debug log
 
+        if (!data.technical_details?.queries) {
+            cypherQueries.innerHTML = '<div class="alert alert-info">No queries generated.</div>';
+            return;
+        }
+
+        const queries = data.technical_details.queries;
         let queryContent = '';
-        if (data.technical_details && data.technical_details.queries) {
-            const queries = data.technical_details.queries;
 
-            // Always show content query
-            if (queries.content_query) {
-                queryContent += `
-                    <div class="cypher-query mb-3">
-                        <h6>Main Search Query:</h6>
-                        <pre><code>${queries.content_query}</code></pre>
-                    </div>
-                `;
-            }
+        // Display content query
+        if (queries.content_query) {
+            queryContent += `
+                <div class="cypher-query mb-3">
+                    <h6>Player Search Query:</h6>
+                    <pre><code>${queries.content_query.trim()}</code></pre>
+                </div>
+            `;
+        }
 
-            // Show entity query if available
-            if (queries.entity_query) {
-                queryContent += `
-                    <div class="cypher-query mb-3">
-                        <h6>Related Entities Query:</h6>
-                        <pre><code>${queries.entity_query}</code></pre>
-                    </div>
-                `;
-            }
+        // Display entity query
+        if (queries.entity_query) {
+            queryContent += `
+                <div class="cypher-query mb-3">
+                    <h6>Related Entities Query:</h6>
+                    <pre><code>${queries.entity_query.trim()}</code></pre>
+                </div>
+            `;
+        }
 
-            // Show search patterns
-            if (queries.parameters && queries.parameters.search_patterns) {
-                queryContent += `
-                    <div class="cypher-query mb-3">
-                        <h6>Search Patterns:</h6>
-                        <pre><code>${JSON.stringify(queries.parameters.search_patterns, null, 2)}</code></pre>
-                    </div>
-                `;
-            }
+        // Display search patterns
+        if (queries.parameters?.search_patterns) {
+            queryContent += `
+                <div class="cypher-query mb-3">
+                    <h6>Search Patterns:</h6>
+                    <pre><code>${JSON.stringify(queries.parameters.search_patterns, null, 2)}</code></pre>
+                </div>
+            `;
+        }
 
-            // Show analysis results
-            if (queries.query_analysis) {
-                queryContent += `
-                    <div class="cypher-query">
-                        <h6>Query Analysis:</h6>
-                        <pre><code>${JSON.stringify(queries.query_analysis, null, 2)}</code></pre>
-                    </div>
-                `;
-            }
+        // Display query analysis
+        if (queries.query_analysis) {
+            queryContent += `
+                <div class="cypher-query">
+                    <h6>Query Analysis:</h6>
+                    <pre><code>${JSON.stringify(queries.query_analysis, null, 2)}</code></pre>
+                </div>
+            `;
         }
 
         cypherQueries.innerHTML = queryContent || '<div class="alert alert-info">No queries generated.</div>';
@@ -168,10 +175,8 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
-            // Update query display
+            // Update query display and audit trail
             displayQueries(data);
-
-            // Update audit trail
             updateAuditTrail(queryText, data);
 
             // Clear input
@@ -179,7 +184,7 @@ document.addEventListener('DOMContentLoaded', function() {
             queryInput.style.height = 'auto';
         })
         .catch(error => {
-            console.error("Error:", error); // Debug log
+            console.error("Error:", error);
 
             // Display error in chat
             chatHistory.innerHTML += `
@@ -219,24 +224,6 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <style>
-#graphVisualization {
-    width: 100%;
-    height: 500px;
-    border: 1px solid var(--bs-border-color);
-    border-radius: 4px;
-    overflow: hidden;
-}
-
-.card {
-    background-color: var(--bs-dark);
-    border: 1px solid var(--bs-border-color);
-}
-
-.card-header {
-    background-color: rgba(0, 0, 0, 0.2);
-    border-bottom: 1px solid var(--bs-border-color);
-}
-
 .chat-message {
     padding: 0.5rem;
     border-radius: 4px;
