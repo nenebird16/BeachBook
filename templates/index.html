@@ -437,22 +437,24 @@ document.addEventListener('DOMContentLoaded', function() {
 .audit-entry {
     padding: 0.5rem;
     border-radius: 0.25rem;
-    background-color: var(--bs-secondary-bg-subtle);
+    background-color: rgba(var(--bs-tertiary-rgb), 0.2);
+    color: var(--bs-emphasis-color);
 }
 
 .audit-entry.error {
-    background-color: var(--bs-danger-bg-subtle);
+    background-color: rgba(var(--bs-danger-rgb), 0.15);
     color: var(--bs-danger);
 }
 
 .cypher-query {
-    background-color: var(--bs-dark-bg-subtle);
+    background-color: rgba(var(--bs-dark-rgb), 0.15);
     padding: 1rem;
     border-radius: 0.25rem;
 }
 
 .cypher-query pre {
     margin-bottom: 0;
+    color: var(--bs-emphasis-color);
 }
 
 .cypher-query-container-wide {
@@ -469,18 +471,27 @@ document.addEventListener('DOMContentLoaded', function() {
     display: none !important;
 }
 
+.alert-success {
+    background-color: rgba(var(--bs-success-rgb), 0.15);
+    color: var(--bs-emphasis-color);
+    border-color: rgba(var(--bs-success-rgb), 0.2);
+}
+
 .custom-file-input .form-control {
     cursor: pointer;
-    background-color: var(--bs-light);
+    background-color: rgba(var(--bs-tertiary-rgb), 0.1);
+    color: var(--bs-emphasis-color);
+    border-color: rgba(var(--bs-tertiary-rgb), 0.2);
 }
 
 .custom-file-input .form-control:hover {
-    background-color: var(--bs-light-rgb);
+    background-color: rgba(var(--bs-tertiary-rgb), 0.15);
 }
 
 .custom-file-input .form-control.has-file {
-    background-color: var(--bs-success-bg-subtle);
-    color: var(--bs-success);
+    background-color: rgba(var(--bs-success-rgb), 0.15);
+    color: var(--bs-emphasis-color);
+    border-color: rgba(var(--bs-success-rgb), 0.2);
 }
 
 .cursor-pointer {
