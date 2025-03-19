@@ -109,5 +109,43 @@ def query_knowledge():
             'response': 'An unexpected error occurred. Please try again.'
         }), 500
 
+# Add document upload route after existing routes
+@app.route('/upload', methods=['POST'])
+def upload_document():
+    """Handle document upload"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
+
+        # Initialize document processor.  Assuming necessary imports are available.
+        from services.document_processor import DocumentProcessor
+        #This assumes llama_service and semantic_processor are globally available or defined earlier.  Adjust as needed based on your project structure.
+
+        doc_processor = DocumentProcessor(
+            graph_service=app.config.get('graph_db'),
+            llama_service=llama_service, #Potentially needs to be initialized before this function
+            semantic_processor=semantic_processor #Potentially needs to be initialized before this function
+        )
+
+        # Process the document
+        result = doc_processor.process_document(file)
+
+        if result.get('error'):
+            logger.error(f"Error processing document: {result['error']}")
+            return jsonify({'error': result['error']}), 500
+
+        return jsonify({
+            'message': 'Document processed successfully',
+            'doc_info': result
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error handling document upload: {str(e)}")
+        return jsonify({'error': 'Failed to process document'}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
