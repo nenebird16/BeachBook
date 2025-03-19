@@ -2,120 +2,78 @@ import os
 import logging
 from typing import Dict, List, Any, Optional
 from urllib.parse import urlparse
-from py2neo import Graph, ConnectionProfile, Node, Relationship
+from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
-import json
-from datetime import datetime
 
 class LlamaService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self.anthropic = Anthropic()
         self.graph = None
 
-        # Initialize Anthropic client for Claude
-        self.anthropic = Anthropic()
-
+        # Try to initialize Neo4j connection if credentials are available
         try:
-            # Get Neo4j credentials
             uri = os.environ.get("NEO4J_URI")
             username = os.environ.get("NEO4J_USER")
             password = os.environ.get("NEO4J_PASSWORD")
 
-            if not all([uri, username, password]):
-                self.logger.error("Neo4j credentials not properly configured")
-                return  # Allow service to initialize without graph database
-
-            # Parse URI for AuraDB
-            parsed_uri = urlparse(uri)
-            self.logger.debug(f"Original URI scheme: {parsed_uri.scheme}")
-            self.logger.debug(f"Original URI netloc: {parsed_uri.netloc}")
-
-            # Initialize direct Neo4j connection
-            profile = ConnectionProfile(
-                scheme="bolt+s" if parsed_uri.scheme == 'neo4j+s' else parsed_uri.scheme,
-                host=parsed_uri.netloc,
-                port=7687,
-                secure=True if parsed_uri.scheme == 'neo4j+s' else False,
-                user=username,
-                password=password
-            )
-            self.graph = Graph(profile=profile)
-            self.logger.info("Successfully connected to Neo4j database")
-
+            if all([uri, username, password]):
+                parsed_uri = urlparse(uri)
+                profile = ConnectionProfile(
+                    scheme="bolt+s" if parsed_uri.scheme == 'neo4j+s' else parsed_uri.scheme,
+                    host=parsed_uri.netloc,
+                    port=7687,
+                    secure=True if parsed_uri.scheme == 'neo4j+s' else False,
+                    user=username,
+                    password=password
+                )
+                self.graph = Graph(profile=profile)
+                self.logger.info("Successfully connected to Neo4j database")
+            else:
+                self.logger.warning("Neo4j credentials not found, running in chat-only mode")
         except Exception as e:
-            self.logger.error(f"Failed to initialize Neo4j connections: {str(e)}")
-            # Allow service to initialize without graph database
+            self.logger.warning(f"Failed to connect to Neo4j: {str(e)}, running in chat-only mode")
 
     def process_query(self, query_text: str) -> Dict:
-        """Process a query using Neo4j and Anthropic"""
+        """Process a query using Claude and optionally Neo4j"""
         try:
-            self.logger.info(f"Processing query: {query_text}")
+            # Always start with a basic chat response
+            chat_response = self.generate_response(query_text)
 
-            # Check if graph database is available
-            if not self.graph:
-                self.logger.warning("Graph database not available, proceeding with conversational response only")
-                return {
-                    'chat_response': self.generate_response(query_text),
-                    'queries': {
-                        'query_analysis': {'query': query_text},
-                        'results': 'No matches found in knowledge graph'
-                    }
-                }
+            # Try to enhance with graph data if available
+            if self.graph:
+                try:
+                    results = self._execute_knowledge_graph_queries(query_text)
+                    if results:
+                        context = self._prepare_context(results)
+                        if context:
+                            chat_response = self.generate_response(query_text, context)
 
-            # Execute knowledge graph queries
-            results = self._execute_knowledge_graph_queries(query_text)
+                        return {
+                            'response': chat_response,
+                            'technical_details': {
+                                'queries': {'query': query_text},
+                                'results': results
+                            }
+                        }
+                except Exception as e:
+                    self.logger.error(f"Error querying graph database: {str(e)}")
 
-            # Prepare context for AI response
-            context_info = self._prepare_context(results)
-
-            # Generate AI response with or without context
-            ai_response = self.generate_response(query_text, context_info)
-
+            # Return basic chat response if no graph data
             return {
-                'chat_response': ai_response,
-                'queries': {
-                    'query_analysis': {'query': query_text},
-                    'results': results
+                'response': chat_response,
+                'technical_details': {
+                    'queries': {'query': query_text},
+                    'results': 'No matches found in knowledge graph'
                 }
             }
 
         except Exception as e:
-            self.logger.error(f"Error processing query: {str(e)}")
+            self.logger.error(f"Error in process_query: {str(e)}")
             return {
-                'chat_response': 'I apologize, but I encountered an error while processing your query. Please try again.',
+                'response': "I apologize, but I encountered an error processing your request. Please try again.",
                 'error': str(e)
             }
-
-    def _execute_knowledge_graph_queries(self, query_text: str) -> List[Dict]:
-        """Execute knowledge graph queries based on the query text"""
-        if not self.graph:
-            return []
-
-        try:
-            # Simple query to match content
-            query = """
-            MATCH (n)
-            WHERE n.content CONTAINS $query
-            RETURN n.content as content
-            LIMIT 5
-            """
-            return self.graph.run(query, query=query_text).data()
-
-        except Exception as e:
-            self.logger.error(f"Error executing knowledge graph queries: {str(e)}")
-            return []
-
-    def _prepare_context(self, results: List[Dict]) -> Optional[str]:
-        """Prepare context for AI response from results"""
-        if not results:
-            return None
-
-        context_sections = []
-        for result in results:
-            if 'content' in result:
-                context_sections.append(result['content'])
-
-        return "\n".join(context_sections) if context_sections else None
 
     def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
         """Generate a natural language response using Claude"""
@@ -129,11 +87,9 @@ class LlamaService:
                 Please provide a natural, conversational response that directly answers the query.
                 """
             else:
-                prompt = f"""As a volleyball knowledge assistant, I need to respond to this query: "{query}"
+                prompt = f"""As a volleyball knowledge assistant, help me with this query: "{query}"
 
-                Since I don't find any specific matches in the knowledge base for this query, I should:
-                1. Politely explain that I can only provide information that exists in the volleyball knowledge base
-                2. Suggest asking about volleyball skills, drills, or practice plans
+                Please provide a helpful response about volleyball concepts, skills, or training methods.
                 """
 
             response = self.anthropic.messages.create(
@@ -143,7 +99,7 @@ class LlamaService:
                 messages=[
                     {
                         "role": "assistant",
-                        "content": "I am a volleyball knowledge assistant that provides information from our connected database focusing on skills, drills, and practice planning."
+                        "content": "I am a volleyball knowledge assistant that helps with skills, drills, and practice planning."
                     },
                     {
                         "role": "user",
@@ -157,3 +113,32 @@ class LlamaService:
         except Exception as e:
             self.logger.error(f"Error generating Claude response: {str(e)}")
             return "I apologize, but I encountered an error generating a response. Please try again."
+
+    def _execute_knowledge_graph_queries(self, query_text: str) -> List[Dict]:
+        """Execute knowledge graph queries based on the query text"""
+        if not self.graph:
+            return []
+
+        try:
+            query = """
+            MATCH (n)
+            WHERE n.content CONTAINS $query
+            RETURN n.content as content
+            LIMIT 5
+            """
+            return self.graph.run(query, query=query_text).data()
+        except Exception as e:
+            self.logger.error(f"Error executing graph query: {str(e)}")
+            return []
+
+    def _prepare_context(self, results: List[Dict]) -> Optional[str]:
+        """Prepare context for AI response from results"""
+        if not results:
+            return None
+
+        context_sections = []
+        for result in results:
+            if 'content' in result:
+                context_sections.append(result['content'])
+
+        return "\n".join(context_sections) if context_sections else None
