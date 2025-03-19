@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let audioChunks = [];
     let recordingInterval;
     let recordingSeconds = 0;
-    
+
     const recordButton = document.getElementById('recordButton');
     const recordingStatus = document.getElementById('recordingStatus');
     const recordingTime = document.getElementById('recordingTime');
@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
-            
+
             mediaRecorder.ondataavailable = (event) => {
                 audioChunks.push(event.data);
             };
@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', function() {
             recordingStatus.classList.remove('d-none');
             recordButton.innerHTML = '<i class="fas fa-stop"></i> Stop Recording';
             recordButton.classList.replace('btn-primary', 'btn-danger');
-            
+
             // Start timer
             recordingSeconds = 0;
             recordingInterval = setInterval(updateRecordingTime, 1000);
@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', function() {
             mediaRecorder.stop();
             mediaRecorder.stream.getTracks().forEach(track => track.stop());
             clearInterval(recordingInterval);
-            
+
             recordButton.innerHTML = '<i class="fas fa-microphone"></i> Start Recording';
             recordButton.classList.replace('btn-danger', 'btn-primary');
             recordingStatus.classList.add('d-none');
@@ -162,7 +162,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             alert('Recording saved successfully!');
             audioPreview.classList.add('d-none');
-            
+            loadJournalHistory();
+
         } catch (err) {
             console.error('Error saving recording:', err);
             alert('Failed to save recording. Please try again.');
@@ -199,7 +200,7 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Journal entry saved successfully!');
             journalText.value = '';
             loadJournalHistory();
-            
+
         } catch (err) {
             console.error('Error saving journal entry:', err);
             alert('Failed to save journal entry. Please try again.');
@@ -223,12 +224,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="mt-2">
                         ${entry.type === 'text' ? 
-                            entry.content : 
+                            `<div class="entry-content" onclick="this.classList.toggle('expanded')">${entry.content}</div>` : 
                             `<audio src="${entry.audio_url}" controls class="w-100"></audio>`}
                     </div>
                 </div>
             `).join('');
-            
+
         } catch (err) {
             console.error('Error loading journal history:', err);
         }
@@ -250,6 +251,31 @@ document.addEventListener('DOMContentLoaded', function() {
     color: var(--bs-emphasis-color);
     padding: 1rem;
     border-radius: 0.25rem;
+}
+
+.entry-content {
+    max-height: 4.5em;
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    transition: max-height 0.3s ease-out;
+}
+
+.entry-content::after {
+    content: '...';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    padding-left: 1em;
+    background: linear-gradient(to right, transparent, rgba(var(--bs-tertiary-rgb), 0.2) 50%);
+}
+
+.entry-content.expanded {
+    max-height: none;
+}
+
+.entry-content.expanded::after {
+    display: none;
 }
 
 .journal-entry audio {
