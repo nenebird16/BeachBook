@@ -10,6 +10,11 @@ from routes.journal_routes import journal_routes
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
+
+# Initialize Flask app
+app = Flask(__name__)
+app.secret_key = os.environ.get("SESSION_SECRET", "dev_secret_key")
+app.register_blueprint(journal_routes)
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
