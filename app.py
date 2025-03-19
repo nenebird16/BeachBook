@@ -7,6 +7,7 @@ from storage.factory import StorageFactory
 from services.semantic_processor import SemanticProcessor
 from services.document_processor import DocumentProcessor
 from services.graph_service import GraphService
+from services.llama_service import LlamaService
 from routes.journal_routes import journal_routes
 
 # Configure logging
@@ -46,6 +47,12 @@ def init_services():
         services['document_processor'] = doc_processor
         logger.info("Document processor initialized successfully")
 
+        # Initialize LlamaService
+        logger.info("Initializing LlamaService...")
+        llama_service = LlamaService()
+        services['llama_service'] = llama_service
+        logger.info("LlamaService initialized successfully")
+
     except Exception as e:
         logger.error(f"Failed to initialize services: {str(e)}")
         raise
@@ -59,10 +66,71 @@ services = init_services()
 app.config['graph_db'] = services.get('graph_db')
 app.config['semantic_processor'] = services.get('semantic_processor')
 app.config['document_processor'] = services.get('document_processor')
+app.config['llama_service'] = services.get('llama_service')
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/query', methods=['POST'])
+def query_knowledge():
+    """Handle knowledge graph queries"""
+    try:
+        if not request.is_json:
+            return jsonify({
+                'error': 'Request must be JSON',
+                'response': 'Sorry, there was an error processing your request.'
+            }), 400
+
+        query = request.json.get('query')
+        if not query:
+            return jsonify({
+                'error': 'No query provided',
+                'response': 'Please provide a question to answer.'
+            }), 400
+
+        # Process the query using LlamaService
+        llama_service = app.config.get('llama_service')
+        if not llama_service:
+            return jsonify({
+                'error': 'Service unavailable',
+                'response': 'The knowledge service is currently unavailable. Please try again later.'
+            }), 503
+
+        # Process the query
+        result = llama_service.process_query(query)
+
+        # Log the response structure for debugging
+        logger.debug("Query result structure:")
+        logger.debug(f"Response text: {result.get('response')}")
+        logger.debug(f"Technical details: {result.get('technical_details')}")
+
+        if not result:
+            logger.error("LlamaService returned None response")
+            return jsonify({
+                'error': 'Service error',
+                'response': 'Sorry, I encountered an error while processing your request. Please try again.'
+            }), 500
+
+        # Format response for frontend
+        response = {
+            'response': result.get('response', 'I apologize, but I was unable to generate a response.'),
+            'technical_details': {
+                'queries': result.get('technical_details', {}).get('queries', {})
+            }
+        }
+
+        # Log the final response being sent to frontend
+        logger.debug(f"Sending response to frontend: {response}")
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        logger.error(f"Error processing query with LlamaService: {str(e)}")
+        return jsonify({
+            'error': 'Failed to process query',
+            'response': 'I encountered an error while processing your question. Please try again.'
+        }), 500
 
 @app.route('/upload', methods=['POST'])
 def upload_document():

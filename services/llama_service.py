@@ -7,7 +7,7 @@ from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
 from services.semantic_processor import SemanticProcessor
 from services.query_templates import QueryTemplates
-from typing import Dict
+from typing import Dict, List, Any, Optional, Tuple
 
 class LlamaService:
     def __init__(self):
@@ -30,23 +30,28 @@ class LlamaService:
             self.logger.debug(f"Original URI scheme: {uri.scheme}")
             self.logger.debug(f"Original URI netloc: {uri.netloc}")
 
+            # Handle AuraDB connections (neo4j+s scheme)
+            if uri.scheme == 'neo4j+s':
+                bolt_uri = f"bolt+s://{uri.netloc}"
+                self.logger.info(f"Using AuraDB connection format: {bolt_uri}")
+            else:
+                bolt_uri = f"bolt://{uri.netloc}"
+                self.logger.info(f"Using standard connection format: {bolt_uri}")
+
             # Initialize direct Neo4j connection for queries
             profile = ConnectionProfile(
-                scheme="bolt+s" if uri.scheme == 'neo4j+s' else uri.scheme,
-                host=uri.netloc,
-                port=7687,
-                secure=True if uri.scheme == 'neo4j+s' else False,
+                uri=bolt_uri,
                 user=NEO4J_USER,
                 password=NEO4J_PASSWORD
             )
             self.graph = Graph(profile=profile)
             self.logger.info("Successfully connected to Neo4j database")
 
-            # Initialize graph store
+            # Initialize graph store for LlamaIndex
             self.graph_store = Neo4jGraphStore(
                 username=NEO4J_USER,
                 password=NEO4J_PASSWORD,
-                url=f"bolt+s://{uri.netloc}" if uri.scheme == 'neo4j+s' else NEO4J_URI,
+                url=bolt_uri,
                 database="neo4j"
             )
             self.logger.info("Successfully initialized Neo4j graph store")
@@ -56,7 +61,7 @@ class LlamaService:
             raise
 
     def process_document(self, content: str) -> bool:
-        """Process document content for storage"""
+        """Process document content for knowledge graph storage"""
         try:
             self.logger.info("Processing document for storage")
 
@@ -75,8 +80,8 @@ class LlamaService:
                         SET d.embedding = $embedding
                         """
                         self.graph.run(query, 
-                                     content_preview=content_preview,
-                                     embedding=chunk['embedding'])
+                                    content_preview=content_preview,
+                                    embedding=chunk['embedding'])
                     except Exception as e:
                         self.logger.error(f"Error storing embedding: {str(e)}")
                         continue
@@ -161,71 +166,7 @@ class LlamaService:
 
         except Exception as e:
             self.logger.error(f"Error generating Claude response: {str(e)}")
-            return None
-
-    def _get_graph_overview(self) -> str:
-        """Get an overview of entities and topics in the graph"""
-        try:
-            # Get all entity types and their instances
-            entity_query = """
-            MATCH (e:Entity)
-            WITH e.type as type, collect(distinct e.name) as entities
-            RETURN type, entities
-            ORDER BY size(entities) DESC
-            """
-            entity_results = self.graph.run(entity_query).data()
-
-            # Get all visual elements
-            visual_query = """
-            MATCH (v:VisualElement)
-            RETURN collect(distinct v.name) as visual_elements
-            """
-            visual_results = self.graph.run(visual_query).data()
-
-            # Get document count and sample titles
-            doc_query = """
-            MATCH (d:Document)
-            RETURN count(d) as doc_count,
-                   collect(distinct d.title)[..5] as sample_titles
-            """
-            doc_results = self.graph.run(doc_query).data()
-
-            if not entity_results and not doc_results[0]['doc_count'] and not visual_results:
-                return None
-
-            # Format overview
-            overview = []
-
-            # Add document information
-            if doc_results[0]['doc_count']:
-                overview.append(f"Documents: {doc_results[0]['doc_count']} total")
-                if doc_results[0]['sample_titles']:
-                    overview.append("Sample documents:")
-                    for title in doc_results[0]['sample_titles']:
-                        overview.append(f"- {title}")
-                    overview.append("")
-
-            # Add entity information
-            if entity_results:
-                overview.append("Topics and concepts found:")
-                for result in entity_results:
-                    if result['type'] and result['entities']:  # Only show non-empty categories
-                        entity_type = result['type']
-                        entities = result['entities'][:5]  # Limit to 5 examples
-                        overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
-                overview.append("")
-
-            # Add visual elements
-            if visual_results and visual_results[0]['visual_elements']:
-                overview.append("Visual elements and concepts:")
-                visual_elements = visual_results[0]['visual_elements'][:5]  # Limit to 5 examples
-                overview.append(f"- {', '.join(visual_elements)}")
-
-            return "\n".join(overview)
-
-        except Exception as e:
-            self.logger.error(f"Error getting graph overview: {str(e)}")
-            return None
+            return "I apologize, but I encountered an error while generating a response. Please try again."
 
     def process_query(self, query_text: str) -> Dict:
         """Process a query using hybrid search"""
@@ -252,7 +193,7 @@ class LlamaService:
             ORDER BY relevance DESC
             """
             vector_results = self.graph.run(vector_query, 
-                                          embedding=query_embedding).data()
+                                        embedding=query_embedding).data()
             self.logger.debug(f"Vector query results: {vector_results}")
 
             # Content-based search as backup
@@ -268,7 +209,7 @@ class LlamaService:
             LIMIT 5
             """
             content_results = self.graph.run(content_query, 
-                                           query=query_text).data()
+                                        query=query_text).data()
             self.logger.debug(f"Content query results: {content_results}")
 
             # Entity-based expansion
@@ -283,7 +224,7 @@ class LlamaService:
             LIMIT 5
             """
             entity_results = self.graph.run(entity_query, 
-                                          query=query_text).data()
+                                        query=query_text).data()
             self.logger.debug(f"Entity query results: {entity_results}")
 
             # Combine and deduplicate results
@@ -291,8 +232,8 @@ class LlamaService:
             seen_titles = set()
             unique_results = []
             for result in all_results:
-                if result['title'] not in seen_titles:
-                    seen_titles.add(result['title'])
+                if result.get('title') not in seen_titles:
+                    seen_titles.add(result.get('title'))
                     unique_results.append(result)
 
             # Prepare context for AI response
@@ -300,8 +241,8 @@ class LlamaService:
             if unique_results:
                 context_sections = []
                 for result in unique_results[:5]:  # Top 5 unique results
-                    context_sections.append(f"Document: {result['title']}")
-                    context_sections.append(f"Content: {result['content'][:500]}")
+                    context_sections.append(f"Document: {result.get('title', 'Untitled')}")
+                    context_sections.append(f"Content: {result.get('content', '')[:500]}")
                     if result.get('entities'):
                         context_sections.append(
                             f"Related concepts: {', '.join(result['entities'])}")
@@ -312,20 +253,72 @@ class LlamaService:
             ai_response = self.generate_response(query_text, context_info)
 
             return {
-                'chat_response': ai_response,
-                'queries': {
-                    'vector_query': vector_query,
-                    'content_query': content_query,
-                    'entity_query': entity_query,
-                    'query_analysis': query_analysis
-                },
-                'results': context_info if context_info else "No matches found in knowledge graph"
+                'response': ai_response,
+                'technical_details': {
+                    'queries': {
+                        'vector_query': vector_query,
+                        'content_query': content_query,
+                        'entity_query': entity_query,
+                        'query_analysis': query_analysis
+                    }
+                }
             }
 
         except Exception as e:
             self.logger.error(f"Error processing query: {str(e)}")
             self.logger.error(f"Query text was: {query_text}")
             raise
+
+    def _get_graph_overview(self) -> Optional[str]:
+        """Get an overview of entities and topics in the graph"""
+        try:
+            # Get all entity types and their instances
+            entity_query = """
+            MATCH (e:Entity)
+            WITH e.type as type, collect(distinct e.name) as entities
+            RETURN type, entities
+            ORDER BY size(entities) DESC
+            """
+            entity_results = self.graph.run(entity_query).data()
+
+            # Get document count and sample titles
+            doc_query = """
+            MATCH (d:Document)
+            RETURN count(d) as doc_count,
+                   collect(distinct d.title)[..5] as sample_titles
+            """
+            doc_results = self.graph.run(doc_query).data()
+
+            if not entity_results and not doc_results[0]['doc_count']:
+                return None
+
+            # Format overview
+            overview = []
+
+            # Add document information
+            if doc_results[0]['doc_count']:
+                overview.append(f"Documents: {doc_results[0]['doc_count']} total")
+                if doc_results[0]['sample_titles']:
+                    overview.append("Sample documents:")
+                    for title in doc_results[0]['sample_titles']:
+                        overview.append(f"- {title}")
+                    overview.append("")
+
+            # Add entity information
+            if entity_results:
+                overview.append("Topics and concepts found:")
+                for result in entity_results:
+                    if result['type'] and result['entities']:  # Only show non-empty categories
+                        entity_type = result['type']
+                        entities = result['entities'][:5]  # Limit to 5 examples
+                        overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
+                overview.append("")
+
+            return "\n".join(overview)
+
+        except Exception as e:
+            self.logger.error(f"Error getting graph overview: {str(e)}")
+            return None
 
     def get_available_queries(self) -> Dict:
         """Get information about available query templates"""
