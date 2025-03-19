@@ -176,6 +176,7 @@ class DocumentProcessor:
             return file.read().decode('utf-8')
         elif file.filename.endswith('.csv'):
             import pandas as pd
+            content = file.read()
             df = pd.read_csv(file)
             return df.to_json(orient='records')
         elif file.filename.endswith(('.pdf', '.doc', '.docx')):
