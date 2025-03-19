@@ -31,6 +31,20 @@ class DocumentProcessor:
     def _load_entity_schemas(self) -> Dict[str, Dict]:
         """Load entity schemas from configuration"""
         return {
+            "Player": {
+                "required": ["name"],
+                "optional": ["nationality", "achievements", "specialization", 
+                           "playing_style", "team_partner", "visual_strengths"],
+                "types": {
+                    "name": str,
+                    "nationality": str,
+                    "achievements": str,
+                    "specialization": str,
+                    "playing_style": str,
+                    "team_partner": str,
+                    "visual_strengths": str
+                }
+            },
             "Skill": {
                 "required": ["name"],
                 "optional": ["description", "category", "difficulty", "visualRequirements"],
@@ -191,21 +205,38 @@ class DocumentProcessor:
         doc = self.nlp(content)
         entities = []
 
-        # Extract named entities
+        # Extract person names as Player entities
         for ent in doc.ents:
-            entities.append({
-                'name': ent.text,
-                'type': ent.label_,
-                'source': 'spacy_ner'
-            })
+            if ent.label_ == "PERSON":
+                entities.append({
+                    'name': ent.text,
+                    'type': 'Player',
+                    'source': 'spacy_ner'
+                })
+            else:
+                entities.append({
+                    'name': ent.text,
+                    'type': ent.label_,
+                    'source': 'spacy_ner'
+                })
 
         # Extract domain entities using rule-based matching
         domain_terms = {
-            'Skill': ['setting', 'passing', 'blocking', 'serving', 'attacking', 'digging'],
-            'Drill': ['pepper', 'queen of the court', 'mini-game', 'scrimmage', 'target practice'],
-            'VisualElement': ['ball tracking', 'peripheral vision', 'trajectory prediction']
+            'Skill': [
+                'setting', 'passing', 'blocking', 'serving', 'attacking', 'digging',
+                'defense', 'reception', 'court coverage', 'jump serve'
+            ],
+            'Drill': [
+                'pepper', 'queen of the court', 'mini-game', 'scrimmage', 
+                'target practice', 'blocking drill', 'defensive drill'
+            ],
+            'VisualElement': [
+                'ball tracking', 'peripheral vision', 'trajectory prediction',
+                'depth perception', 'pattern recognition', 'visual focus'
+            ]
         }
 
+        # Extract domain-specific terms
         for entity_type, terms in domain_terms.items():
             for term in terms:
                 if term.lower() in content.lower():
@@ -213,6 +244,18 @@ class DocumentProcessor:
                         'name': term,
                         'type': entity_type,
                         'source': 'domain_terminology'
+                    })
+
+        # Add relationships between players mentioned together
+        player_entities = [e for e in entities if e['type'] == 'Player']
+        for i, player1 in enumerate(player_entities):
+            for player2 in player_entities[i+1:]:
+                if abs(content.find(player1['name']) - content.find(player2['name'])) < 100:
+                    # Players mentioned close together likely have a relationship
+                    entities.append({
+                        'name': f"{player1['name']} and {player2['name']}",
+                        'type': 'Partnership',
+                        'source': 'relationship_inference'
                     })
 
         return entities

@@ -103,18 +103,45 @@ class GraphService:
     def create_entity_node(self, entity_info, doc_node):
         """Create an entity node and link it to the document"""
         try:
-            # Create entity node
-            entity_node = Node("Entity",
-                            name=entity_info['name'],
-                            type=entity_info['type'])
+            # Create entity node with the specific label based on type
+            labels = ["Entity"]  # Base label
+            if entity_info['type'] in ['Player', 'Skill', 'Drill', 'VisualElement', 'Partnership']:
+                labels.append(entity_info['type'])
+
+            entity_node = Node(*labels,
+                             name=entity_info['name'],
+                             type=entity_info['type'])
 
             # Create relationship between document and entity
             relationship = Relationship(doc_node, "CONTAINS", entity_node)
 
             # Create both node and relationship in a single transaction
             self.graph.create(relationship)
-            self.logger.info(f"Created entity node: {entity_info['name']} ({entity_info['type']})")
 
+            # For partnerships, create additional relationships
+            if entity_info['type'] == 'Partnership':
+                player_names = entity_info['name'].split(' and ')
+                if len(player_names) == 2:
+                    # Create or find individual player nodes
+                    for player_name in player_names:
+                        player_query = """
+                        MERGE (p:Player {name: $name})
+                        RETURN p
+                        """
+                        self.graph.run(player_query, name=player_name)
+
+                    # Create partnership relationship
+                    partnership_query = """
+                    MATCH (p1:Player {name: $player1})
+                    MATCH (p2:Player {name: $player2})
+                    MERGE (p1)-[r:PARTNERS_WITH]-(p2)
+                    RETURN r
+                    """
+                    self.graph.run(partnership_query, 
+                                 player1=player_names[0], 
+                                 player2=player_names[1])
+
+            self.logger.info(f"Created entity node: {entity_info['name']} ({entity_info['type']})")
             return entity_node
 
         except Exception as e:
