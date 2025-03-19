@@ -2,6 +2,7 @@ import os
 import logging
 from typing import Dict, List, Any, Optional
 from anthropic import Anthropic
+from datetime import datetime
 
 class LlamaService:
     def __init__(self, graph_db=None):
@@ -19,7 +20,10 @@ class LlamaService:
             chat_response = self.generate_response(query_text)
             query_analysis = {
                 'input_query': query_text,
-                'database_state': 'disconnected'
+                'database_state': 'disconnected',
+                'query_type': 'content_search',
+                'analysis_timestamp': datetime.now().isoformat(),
+                'parameters': {'query': query_text}
             }
 
             # Try to enhance with graph data if available
@@ -28,26 +32,61 @@ class LlamaService:
                     self.logger.info("Attempting to query graph database")
                     query_analysis['database_state'] = 'connected'
 
-                    results = self._execute_knowledge_graph_queries(query_text)
+                    # Define the Cypher queries for different search strategies
+                    queries = {
+                        'content_search': """
+                        MATCH (n)
+                        WHERE n.content CONTAINS $query
+                        RETURN n.content as content
+                        LIMIT 5
+                        """,
+                        'entity_search': """
+                        MATCH (n)-[:RELATES_TO]-(m)
+                        WHERE n.content CONTAINS $query
+                        RETURN DISTINCT m.content as content
+                        LIMIT 3
+                        """
+                    }
+
+                    # Execute primary content search
+                    results = self.graph_db.query(queries['content_search'], {'query': query_text})
+                    related_results = []
+
                     if results:
-                        self.logger.info(f"Found {len(results)} results in knowledge graph")
-                        context = self._prepare_context(results)
+                        # If we found direct matches, also look for related content
+                        self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
+                        related_results = self.graph_db.query(queries['entity_search'], {'query': query_text})
+
+                        context = self._prepare_context(results + related_results)
                         if context:
                             chat_response = self.generate_response(query_text, context)
-                            query_analysis['found_matches'] = True
-                            query_analysis['match_count'] = len(results)
+
+                        query_analysis.update({
+                            'found_matches': True,
+                            'direct_matches': len(results),
+                            'related_matches': len(related_results),
+                            'executed_queries': queries
+                        })
                     else:
-                        self.logger.info("No results found in knowledge graph")
-                        query_analysis['found_matches'] = False
+                        self.logger.info("No direct matches found in knowledge graph")
+                        query_analysis.update({
+                            'found_matches': False,
+                            'executed_queries': queries
+                        })
 
                     return {
                         'response': chat_response,
                         'technical_details': {
                             'queries': {
                                 'query_analysis': query_analysis,
-                                'content_query': "MATCH (n) WHERE n.content CONTAINS $query RETURN n.content as content LIMIT 5"
+                                'content_query': queries['content_search'],
+                                'entity_query': queries['entity_search'],
+                                'parameters': {'query': query_text}
                             },
-                            'results': results if results else 'No matches found in knowledge graph'
+                            'results': {
+                                'direct_matches': results,
+                                'related_matches': related_results
+                            } if results or related_results else 'No matches found in knowledge graph'
                         }
                     }
 
@@ -63,7 +102,7 @@ class LlamaService:
                     'queries': {
                         'query_analysis': query_analysis
                     },
-                    'results': 'No matches found in knowledge graph'
+                    'results': 'No graph database available'
                 }
             }
 
@@ -73,25 +112,6 @@ class LlamaService:
                 'response': "I apologize, but I encountered an error processing your request. Please try again.",
                 'error': str(e)
             }
-
-    def _execute_knowledge_graph_queries(self, query_text: str) -> List[Dict]:
-        """Execute knowledge graph queries based on the query text"""
-        if not self.graph_db:
-            return []
-
-        try:
-            query = """
-            MATCH (n)
-            WHERE n.content CONTAINS $query
-            RETURN n.content as content
-            LIMIT 5
-            """
-            results = self.graph_db.query(query, {'query': query_text})
-            self.logger.info(f"Query executed successfully, found {len(results)} results")
-            return results
-        except Exception as e:
-            self.logger.error(f"Error executing graph query: {str(e)}")
-            return []
 
     def _prepare_context(self, results: List[Dict]) -> Optional[str]:
         """Prepare context for AI response from results"""

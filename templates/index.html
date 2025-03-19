@@ -343,37 +343,40 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Only try to display technical details if they exist
             if (data.technical_details && data.technical_details.queries) {
-                const queryAnalysis = data.technical_details.queries.query_analysis || {};
+                const queries = data.technical_details.queries;
+                const analysis = queries.query_analysis || {};
+
                 let queryContent = `
                     <div class="cypher-query mb-3">
                         <h6>Query Analysis:</h6>
-                        <pre><code>${JSON.stringify(queryAnalysis, null, 2)}</code></pre>
+                        <div class="query-details">
+                            <p><strong>Query Type:</strong> ${analysis.query_type || 'Unknown'}</p>
+                            <p><strong>Database State:</strong> ${analysis.database_state || 'Unknown'}</p>
+                            <p><strong>Timestamp:</strong> ${analysis.analysis_timestamp || 'Unknown'}</p>
+                            ${analysis.found_matches !== undefined ? 
+                                `<p><strong>Found Matches:</strong> ${analysis.found_matches}</p>
+                                 <p><strong>Direct Matches:</strong> ${analysis.direct_matches || 0}</p>
+                                 <p><strong>Related Matches:</strong> ${analysis.related_matches || 0}</p>` : ''}
+                        </div>
                     </div>
                 `;
 
-                if (data.technical_details.queries.vector_query) {
+                if (queries.content_query) {
                     queryContent += `
                         <div class="cypher-query mb-3">
-                            <h6>Vector Similarity Search:</h6>
-                            <pre><code>${data.technical_details.queries.vector_query}</code></pre>
+                            <h6>Content Search Query:</h6>
+                            <pre><code>${queries.content_query}</code></pre>
+                            <p><strong>Parameters:</strong></p>
+                            <pre><code>${JSON.stringify(queries.parameters, null, 2)}</code></pre>
                         </div>
                     `;
                 }
 
-                if (data.technical_details.queries.content_query) {
-                    queryContent += `
-                        <div class="cypher-query mb-3">
-                            <h6>Content-Based Search:</h6>
-                            <pre><code>${data.technical_details.queries.content_query}</code></pre>
-                        </div>
-                    `;
-                }
-
-                if (data.technical_details.queries.entity_query) {
+                if (queries.entity_query) {
                     queryContent += `
                         <div class="cypher-query">
-                            <h6>Entity-Based Expansion:</h6>
-                            <pre><code>${data.technical_details.queries.entity_query}</code></pre>
+                            <h6>Entity Search Query:</h6>
+                            <pre><code>${queries.entity_query}</code></pre>
                         </div>
                     `;
                 }
