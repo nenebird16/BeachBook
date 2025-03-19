@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Storage Configuration
-STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "volleyball-knowledge-base")
+STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "default")
 UPLOAD_FOLDER = "uploads"
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
 

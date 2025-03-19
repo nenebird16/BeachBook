@@ -12,7 +12,7 @@ ALLOWED_AUDIO_EXTENSIONS = {'wav', 'mp3', 'm4a'}
 # Initialize storage client with error handling
 try:
     storage_client = ObjectStorageClient()
-    # Test connection by listing files
+    storage_client.create_bucket("default")  # Create default bucket if it doesn't exist
     storage_client.list()
 except Exception as e:
     logger.error(f"Failed to initialize storage client: {str(e)}")
