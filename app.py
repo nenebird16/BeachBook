@@ -1,24 +1,14 @@
 import os
 import logging
-import config  # Import config first to load environment variables
+import config
 from flask import Flask, request, render_template, jsonify, Response, stream_with_context
 from werkzeug.utils import secure_filename
 from routes.journal_routes import journal_routes
+from storage.factory import StorageFactory
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-# Log Neo4j configuration status
-logger.debug(f"Initial NEO4J_URI: {'Present' if os.environ.get('NEO4J_URI') else 'Not present'}")
-logger.debug(f"Config NEO4J_URI: {'Present' if config.NEO4J_URI else 'Not present'}")
-
-# Remove NEO4J_URI from environment after config is loaded
-original_uri = os.environ.pop('NEO4J_URI', None)
-
-from services.document_processor import DocumentProcessor
-from services.graph_service import GraphService
-from services.llama_service import LlamaService
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -26,15 +16,23 @@ app.secret_key = os.environ.get("SESSION_SECRET")
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Initialize services
+# Initialize storage services
 try:
-    logger.info("Initializing Neo4j and LlamaIndex services...")
-    graph_service = GraphService()
-    llama_service = LlamaService()
-    doc_processor = DocumentProcessor(graph_service, llama_service)
-    logger.info("Services initialized successfully")
+    logger.info("Initializing storage services...")
+    graph_db = StorageFactory.create_graph_database("neo4j")
+    object_storage = StorageFactory.create_object_storage("replit")
+
+    # Connect to storage services
+    graph_db.connect()
+    object_storage.connect()
+
+    # Make storage services available to the app context
+    app.config['graph_db'] = graph_db
+    app.config['object_storage'] = object_storage
+
+    logger.info("Storage services initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize services: {str(e)}")
+    logger.error(f"Failed to initialize storage services: {str(e)}")
     raise
 
 # Register blueprints
@@ -65,9 +63,11 @@ def process_document_with_progress(file_path):
             filename = os.path.basename(file_path)
             file_obj = FileWrapper(content, filename)
 
-            # Process document
-            doc_info = doc_processor.process_document(file_obj)
-            logger.debug(f"Document processed with info: {doc_info}")
+            # Process document using graph database
+            doc_info = {'content': content, 'filename': filename}
+            graph_db = app.config['graph_db']
+            node = graph_db.create_node('Document', doc_info)
+            logger.debug(f"Document node created: {node}")
 
             # Stream intermediate progress updates
             stages = [
@@ -80,11 +80,7 @@ def process_document_with_progress(file_path):
             for stage, progress in stages:
                 yield f"data: {{\"stage\": \"{stage}\", \"progress\": {progress}}}\n\n"
 
-            # Always send a completion event, even if doc_info indicates an error
-            if doc_info.get('error'):
-                yield f"data: {{\"stage\": \"error\", \"error\": \"{doc_info['error']}\"}}\n\n"
-            else:
-                yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
+            yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
 
     except Exception as e:
         logger.error(f"Error during document processing: {str(e)}")
@@ -96,7 +92,6 @@ def upload_document():
     """Handle document upload and processing with event streaming"""
     try:
         if request.method == 'GET':
-            # Get the filename from the query parameter
             filename = request.args.get('filename')
             if not filename:
                 return jsonify({'error': 'No filename provided'}), 400
@@ -106,7 +101,6 @@ def upload_document():
             if not os.path.exists(file_path):
                 return jsonify({'error': 'File not found'}), 404
 
-            # Return SSE response
             return Response(
                 stream_with_context(process_document_with_progress(file_path)),
                 mimetype='text/event-stream',
@@ -126,19 +120,20 @@ def upload_document():
             if file.filename == '':
                 return jsonify({'error': 'No file selected'}), 400
 
-            # Ensure upload directory exists
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+            # Store file in object storage
+            object_storage = app.config['object_storage']
+            file_data = file.read()
+            file_url = object_storage.store_file(
+                file_data,
+                secure_filename(file.filename),
+                file.content_type
+            )
 
-            # Save the uploaded file
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-
-            logger.info(f"File saved: {file_path}")
-            return jsonify({'status': 'processing', 'filename': filename}), 200, {
-                'Content-Type': 'application/json',
-                'X-Content-Type-Options': 'nosniff'
-            }
+            logger.info(f"File stored: {file_url}")
+            return jsonify({
+                'status': 'success',
+                'file_url': file_url
+            }), 200
 
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")
@@ -151,28 +146,19 @@ def query_knowledge():
         if not query:
             return jsonify({'error': 'No query provided'}), 400
 
-        # Process query through RAG pipeline
-        response = llama_service.process_query(query)
+        # Query graph database
+        graph_db = app.config['graph_db']
+        results = graph_db.query(
+            "MATCH (d:Document) WHERE d.content CONTAINS $query RETURN d",
+            {'query': query}
+        )
+
         return jsonify({
-            'response': response['chat_response'],
-            'technical_details': {
-                'queries': response['queries'],
-                'results': response['results']
-            }
+            'results': results
         })
 
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/graph', methods=['GET'])
-def get_graph():
-    try:
-        graph_data = graph_service.get_visualization_data()
-        return jsonify(graph_data)
-
-    except Exception as e:
-        logger.error(f"Error fetching graph data: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
