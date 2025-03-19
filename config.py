@@ -6,6 +6,11 @@ from urllib.parse import urlparse
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Storage Configuration
+STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "volleyball-knowledge-base")
+UPLOAD_FOLDER = "uploads"
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
+
 # Neo4j Configuration with validation
 def validate_neo4j_uri(uri: str) -> bool:
     """Validate Neo4j URI format"""
@@ -64,7 +69,3 @@ except ValueError as e:
 # LlamaIndex Configuration
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 logger.debug(f"OpenAI API Key configured: {'Yes' if OPENAI_API_KEY else 'No'}")
-
-# Flask Configuration
-UPLOAD_FOLDER = "uploads"
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size

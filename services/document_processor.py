@@ -5,19 +5,23 @@ from typing import Dict, List
 import nltk
 
 # Download required NLTK data
-nltk.download('punkt')
-nltk.download('punkt_tab')
+nltk.download('punkt', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 
 class DocumentProcessor:
-    def __init__(self, graph_service, llama_service, semantic_processor=None):
+    def __init__(self, graph_service, semantic_processor=None):
         self.graph_service = graph_service
-        self.llama_service = llama_service
         self.semantic_processor = semantic_processor
         self.logger = logging.getLogger(__name__)
 
         try:
             # Initialize spaCy model
-            self.nlp = spacy.load("en_core_web_sm")
+            try:
+                self.nlp = spacy.load("en_core_web_sm")
+            except OSError:
+                self.logger.info("Downloading spaCy model...")
+                spacy.cli.download("en_core_web_sm")
+                self.nlp = spacy.load("en_core_web_sm")
             self.logger.info("Successfully loaded spaCy model")
         except Exception as e:
             self.logger.error(f"Error loading spaCy model: {str(e)}")
@@ -25,15 +29,15 @@ class DocumentProcessor:
 
     def process_document(self, file) -> Dict:
         """Process uploaded document and store in knowledge graph with semantic analysis"""
-        # Initialize doc_info at the start
-        doc_info = {
-            'title': file.filename,
-            'timestamp': datetime.now().isoformat(),
-            'stage': 'extracting',
-            'progress': 20
-        }
-
         try:
+            # Create document info
+            doc_info = {
+                'title': file.filename,
+                'timestamp': datetime.now().isoformat(),
+                'stage': 'extracting',
+                'progress': 20
+            }
+
             # Extract file content
             self.logger.info(f"Extracting content from file: {file.filename}")
             file_content = self._extract_file_content(file)
@@ -61,18 +65,6 @@ class DocumentProcessor:
             entities = self._extract_entities(file_content)
             self._create_entity_nodes(doc_node, entities)
             self.logger.info(f"Created {len(entities)} entity relationships")
-
-            # Update progress
-            doc_info['stage'] = 'storing'
-            doc_info['progress'] = 80
-
-            # Process with LlamaIndex after entity extraction
-            if not self.llama_service:
-                raise ValueError("LlamaService not initialized")
-
-            self.logger.info("Processing document with LlamaIndex...")
-            self.llama_service.process_document(file_content)
-            self.logger.info("Document processed successfully with LlamaIndex")
 
             # Final progress update
             doc_info['stage'] = 'complete'
@@ -189,65 +181,3 @@ class DocumentProcessor:
         except Exception as e:
             self.logger.error(f"Error in entity node creation: {str(e)}")
             raise
-
-    def _load_entity_schemas(self) -> Dict[str, Dict]:
-        """Load entity schemas from configuration"""
-        return {
-            "Player": {
-                "required": ["name"],
-                "optional": ["nationality", "achievements", "specialization"],
-                "types": {
-                    "name": str,
-                    "nationality": str,
-                    "achievements": str,
-                    "specialization": str
-                }
-            },
-            "Skill": {
-                "required": ["name"],
-                "optional": ["description", "category", "difficulty"],
-                "types": {
-                    "name": str,
-                    "description": str,
-                    "category": str,
-                    "difficulty": str
-                }
-            },
-            "Drill": {
-                "required": ["name"],
-                "optional": ["description", "focus_area", "intensity"],
-                "types": {
-                    "name": str,
-                    "description": str,
-                    "focus_area": str,
-                    "intensity": str
-                }
-            }
-        }
-
-    def _load_relationship_schemas(self) -> Dict[str, Dict]:
-        """Load relationship schemas from configuration"""
-        return {
-            "DEVELOPS": {
-                "source": ["Drill"],
-                "target": ["Skill"],
-                "properties": {
-                    "required": [],
-                    "optional": ["effectiveness_rating"],
-                    "types": {
-                        "effectiveness_rating": int
-                    }
-                }
-            },
-            "REQUIRES": {
-                "source": ["Skill"],
-                "target": ["Skill"],
-                "properties": {
-                    "required": [],
-                    "optional": ["strength"],
-                    "types": {
-                        "strength": int
-                    }
-                }
-            }
-        }

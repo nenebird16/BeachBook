@@ -3,6 +3,8 @@ import logging
 from typing import Optional
 from .base import GraphDatabaseInterface, ObjectStorageInterface
 from .neo4j_impl import Neo4jDatabase
+from .replit_storage_impl import ReplitObjectStorage
+from config import STORAGE_BUCKET
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,20 @@ class StorageFactory:
 
         if storage_type == "replit":
             try:
-                from replit import db
-                return db
+                # Use the provided bucket name or fall back to config
+                bucket = bucket_name or STORAGE_BUCKET
+                if not bucket:
+                    logger.error("No storage bucket specified")
+                    return None
+
+                storage = ReplitObjectStorage(bucket_name=bucket)
+                if storage.connect():
+                    logger.info(f"Successfully created Replit storage with bucket: {bucket}")
+                    return storage
+                else:
+                    logger.error("Failed to connect to Replit storage")
+                    return None
+
             except Exception as e:
                 logger.error(f"Failed to create Replit storage: {str(e)}")
                 return None
