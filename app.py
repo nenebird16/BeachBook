@@ -1,7 +1,8 @@
 import os
 import logging
 import config  # Import config first to load environment variables
-from flask import Flask, request, render_template, jsonify, Response, stream_with_context
+from flask import Flask, request, render_template, jsonify, Response, stream_with_context, session
+from werkzeug.utils import secure_filename
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -39,29 +40,44 @@ except Exception as e:
 def index():
     return render_template('index.html')
 
-def generate_progress_events(file):
-    """Generator function to yield progress events"""
+def process_document_with_progress(file_path):
+    """Process document and yield progress events"""
     try:
         # Initial upload stage
         yield "data: {\"stage\": \"uploading\", \"progress\": 20}\n\n"
 
-        # Process document
-        doc_info = doc_processor.process_document(file)
-        logger.debug(f"Document processed with info: {doc_info}")
+        # Open and process the file
+        with open(file_path, 'r') as file:
+            content = file.read()
+            # Create a file-like object
+            class FileWrapper:
+                def __init__(self, content, filename):
+                    self.content = content
+                    self.filename = filename
 
-        # Stream intermediate progress updates
-        stages = [
-            ('extracting', 40),
-            ('processing', 60),
-            ('analyzing', 80),
-            ('storing', 90)
-        ]
+                def read(self):
+                    return self.content.encode('utf-8')
 
-        for stage, progress in stages:
-            yield f"data: {{\"stage\": \"{stage}\", \"progress\": {progress}}}\n\n"
+            filename = os.path.basename(file_path)
+            file_obj = FileWrapper(content, filename)
 
-        # Send completion event
-        yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
+            # Process document
+            doc_info = doc_processor.process_document(file_obj)
+            logger.debug(f"Document processed with info: {doc_info}")
+
+            # Stream intermediate progress updates
+            stages = [
+                ('extracting', 40),
+                ('processing', 60),
+                ('analyzing', 80),
+                ('storing', 90)
+            ]
+
+            for stage, progress in stages:
+                yield f"data: {{\"stage\": \"{stage}\", \"progress\": {progress}}}\n\n"
+
+            # Send completion event
+            yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
 
     except Exception as e:
         logger.error(f"Error during document processing: {str(e)}")
@@ -73,9 +89,19 @@ def upload_document():
     """Handle document upload and processing with event streaming"""
     try:
         if request.method == 'GET':
-            # This is for the EventSource connection
+            # Get the filename from the query parameter
+            filename = request.args.get('filename')
+            if not filename:
+                return jsonify({'error': 'No filename provided'}), 400
+
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(filename))
+
+            if not os.path.exists(file_path):
+                return jsonify({'error': 'File not found'}), 404
+
+            # Return SSE response
             return Response(
-                stream_with_context(generate_progress_events(request.files.get('file'))),
+                stream_with_context(process_document_with_progress(file_path)),
                 mimetype='text/event-stream',
                 headers={
                     'Cache-Control': 'no-cache',
@@ -91,8 +117,16 @@ def upload_document():
             if file.filename == '':
                 return jsonify({'error': 'No file selected'}), 400
 
-            logger.info(f"Starting document processing for {file.filename}")
-            return jsonify({'status': 'processing'})
+            # Ensure upload directory exists
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+            # Save the uploaded file
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+
+            logger.info(f"File saved: {file_path}")
+            return jsonify({'status': 'processing', 'filename': filename})
 
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")

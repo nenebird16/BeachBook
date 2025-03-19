@@ -80,28 +80,20 @@ class DocumentProcessor:
             self.logger.error(f"Error processing document: {str(e)}")
             doc_info['stage'] = 'error'
             doc_info['error'] = str(e)
-            return doc_info  # Return doc_info instead of raising the exception
+            return doc_info
 
     def _extract_file_content(self, file) -> str:
         """Extract content from file based on file type"""
         try:
-            if file.filename.endswith('.txt'):
+            # Handle both file-like objects and our custom FileWrapper
+            if hasattr(file, 'read'):
                 content = file.read()
                 return content.decode('utf-8') if isinstance(content, bytes) else str(content)
-            elif file.filename.endswith('.csv'):
-                import pandas as pd
-                df = pd.read_csv(file)
-                return df.to_string(index=False)  # Convert to plain text format
-            elif file.filename.endswith(('.pdf', '.doc', '.docx')):
-                raise NotImplementedError(
-                    "Binary file processing is not yet implemented. "
-                    "Currently supported formats: .txt, .csv"
-                )
+            elif hasattr(file, 'content'):
+                return str(file.content)
             else:
-                raise ValueError(
-                    "Unsupported file type. "
-                    "Currently supported formats: .txt, .csv"
-                )
+                raise ValueError("Invalid file object provided")
+
         except Exception as e:
             self.logger.error(f"Error extracting file content: {str(e)}")
             raise
