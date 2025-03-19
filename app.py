@@ -69,6 +69,7 @@ def generate_progress_events(file):
 
 @app.route('/upload', methods=['POST'])
 def upload_document():
+    """Handle document upload and processing with event streaming"""
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
