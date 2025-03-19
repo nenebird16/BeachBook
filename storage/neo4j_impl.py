@@ -2,7 +2,6 @@ import os
 import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
-
 from py2neo import Graph, Node, Relationship, ConnectionProfile
 from .base import GraphDatabaseInterface
 
@@ -20,6 +19,10 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
         # Validate credentials on initialization
         if not all([uri, username, password]):
+            self.logger.error("Missing Neo4j credentials:")
+            self.logger.error(f"URI present: {bool(uri)}")
+            self.logger.error(f"Username present: {bool(username)}")
+            self.logger.error(f"Password present: {bool(password)}")
             raise ValueError("Neo4j credentials must be provided (URI, username, and password)")
 
         # Validate URI format
@@ -36,7 +39,8 @@ class Neo4jDatabase(GraphDatabaseInterface):
         try:
             # Parse URI for AuraDB
             uri = urlparse(self.uri)
-            self.logger.debug(f"Connecting to Neo4j - Scheme: {uri.scheme}, Host: {uri.netloc}")
+            self.logger.info("Using AuraDB connection format")
+            self.logger.debug(f"Connection profile configured: bolt+s://{uri.netloc}")
 
             # Initialize direct Neo4j connection
             profile = ConnectionProfile(
