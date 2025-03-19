@@ -1,64 +1,16 @@
 import os
 import logging
 from typing import Dict, List, Any, Optional
-from urllib.parse import urlparse
-from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
 
 class LlamaService:
-    def __init__(self):
+    def __init__(self, graph_db=None):
         self.logger = logging.getLogger(__name__)
         self.anthropic = Anthropic()
-        self.graph = None
+        self.graph_db = graph_db
 
-        # Try to initialize Neo4j connection if credentials are available
-        try:
-            uri = os.environ.get("NEO4J_URI")
-            username = os.environ.get("NEO4J_USER")
-            password = os.environ.get("NEO4J_PASSWORD")
-
-            if all([uri, username, password]):
-                parsed_uri = urlparse(uri)
-
-                # Map Neo4j URI schemes to compatible py2neo schemes
-                scheme_mapping = {
-                    'neo4j': 'bolt',
-                    'neo4j+s': 'bolt+s',
-                    'bolt': 'bolt',
-                    'bolt+s': 'bolt+s'
-                }
-
-                # Get the correct scheme or default to bolt
-                original_scheme = parsed_uri.scheme
-                scheme = scheme_mapping.get(original_scheme, 'bolt')
-
-                self.logger.info(f"Connecting to Neo4j with scheme: {scheme} (mapped from {original_scheme})")
-                self.logger.debug(f"Host: {parsed_uri.hostname}, Port: {parsed_uri.port or 7687}")
-
-                profile = ConnectionProfile(
-                    scheme=scheme,
-                    host=parsed_uri.hostname,
-                    port=parsed_uri.port or 7687,
-                    secure=scheme.endswith('+s'),
-                    user=username,
-                    password=password
-                )
-
-                self.graph = Graph(profile=profile)
-
-                # Test the connection and check for data
-                result = self.graph.run("MATCH (n) RETURN count(n) as count").data()
-                node_count = result[0]['count'] if result else 0
-                self.logger.info(f"Successfully connected to Neo4j database. Found {node_count} nodes.")
-
-                # If no nodes exist, log a warning
-                if node_count == 0:
-                    self.logger.warning("Neo4j database is empty. No nodes found.")
-            else:
-                self.logger.warning("Neo4j credentials not found, running in chat-only mode")
-        except Exception as e:
-            self.logger.error(f"Failed to connect to Neo4j: {str(e)}, running in chat-only mode")
-            self.graph = None
+        if not self.graph_db:
+            self.logger.warning("No graph database provided, running in chat-only mode")
 
     def process_query(self, query_text: str) -> Dict:
         """Process a query using Claude and optionally Neo4j"""
@@ -71,14 +23,13 @@ class LlamaService:
             }
 
             # Try to enhance with graph data if available
-            if self.graph:
+            if self.graph_db:
                 try:
-                    self.logger.info("Attempting to query Neo4j database")
+                    self.logger.info("Attempting to query graph database")
                     query_analysis['database_state'] = 'connected'
 
-                    # First check if we have any nodes at all
-                    count_result = self.graph.run("MATCH (n) RETURN count(n) as count").data()
-                    node_count = count_result[0]['count'] if count_result else 0
+                    # First check if database has any nodes
+                    node_count = self.graph_db.count_nodes()
                     query_analysis['total_nodes'] = node_count
 
                     if node_count == 0:
@@ -133,6 +84,38 @@ class LlamaService:
                 'error': str(e)
             }
 
+    def _execute_knowledge_graph_queries(self, query_text: str) -> List[Dict]:
+        """Execute knowledge graph queries based on the query text"""
+        if not self.graph_db:
+            return []
+
+        try:
+            # Use the abstracted graph database interface
+            query = """
+            MATCH (n)
+            WHERE n.content CONTAINS $query
+            RETURN n.content as content
+            LIMIT 5
+            """
+            results = self.graph_db.query(query, {'query': query_text})
+            self.logger.info(f"Query executed successfully, found {len(results)} results")
+            return results
+        except Exception as e:
+            self.logger.error(f"Error executing graph query: {str(e)}")
+            return []
+
+    def _prepare_context(self, results: List[Dict]) -> Optional[str]:
+        """Prepare context for AI response from results"""
+        if not results:
+            return None
+
+        context_sections = []
+        for result in results:
+            if 'content' in result:
+                context_sections.append(result['content'])
+
+        return "\n".join(context_sections) if context_sections else None
+
     def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
         """Generate a natural language response using Claude"""
         try:
@@ -171,37 +154,3 @@ class LlamaService:
         except Exception as e:
             self.logger.error(f"Error generating Claude response: {str(e)}")
             return "I apologize, but I encountered an error generating a response. Please try again."
-
-    def _execute_knowledge_graph_queries(self, query_text: str) -> List[Dict]:
-        """Execute knowledge graph queries based on the query text"""
-        if not self.graph:
-            return []
-
-        try:
-            # Test connection before executing query
-            self.graph.run("MATCH (n) RETURN count(n) as count LIMIT 1")
-
-            query = """
-            MATCH (n)
-            WHERE n.content CONTAINS $query
-            RETURN n.content as content
-            LIMIT 5
-            """
-            results = self.graph.run(query, query=query_text).data()
-            self.logger.info(f"Query executed successfully, found {len(results)} results")
-            return results
-        except Exception as e:
-            self.logger.error(f"Error executing graph query: {str(e)}")
-            return []
-
-    def _prepare_context(self, results: List[Dict]) -> Optional[str]:
-        """Prepare context for AI response from results"""
-        if not results:
-            return None
-
-        context_sections = []
-        for result in results:
-            if 'content' in result:
-                context_sections.append(result['content'])
-
-        return "\n".join(context_sections) if context_sections else None

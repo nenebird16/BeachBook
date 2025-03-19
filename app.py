@@ -2,6 +2,8 @@ import os
 import logging
 import config
 from flask import Flask, request, render_template, jsonify
+from werkzeug.utils import secure_filename
+from storage.factory import StorageFactory
 from llama_service import LlamaService
 
 # Configure logging
@@ -13,6 +15,31 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET")
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+def init_storage_services():
+    """Initialize storage services with proper error handling"""
+    services = {'graph_db': None}
+
+    try:
+        # Initialize graph database
+        logger.info("Initializing graph database...")
+        graph_db = StorageFactory.create_graph_database("neo4j")
+        if graph_db:
+            logger.info("Graph database initialized successfully")
+            services['graph_db'] = graph_db
+        else:
+            logger.error("Failed to initialize graph database")
+
+    except Exception as e:
+        logger.error(f"Failed to initialize storage services: {str(e)}")
+
+    return services
+
+# Initialize storage services
+services = init_storage_services()
+
+# Make storage services available to the app context
+app.config['graph_db'] = services.get('graph_db')
 
 # Configure app routes
 @app.route('/')
@@ -37,8 +64,8 @@ def query_knowledge():
             }), 400
 
         try:
-            # Initialize LlamaService for processing queries
-            llama_service = LlamaService()
+            # Initialize LlamaService with graph database from app config
+            llama_service = LlamaService(graph_db=app.config.get('graph_db'))
             result = llama_service.process_query(query)
 
             if not result:
