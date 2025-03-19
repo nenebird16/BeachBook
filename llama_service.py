@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from urllib.parse import urlparse
 from py2neo import Graph, ConnectionProfile, Node, Relationship
 from anthropic import Anthropic
@@ -10,18 +10,20 @@ from datetime import datetime
 class LlamaService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self.graph = None
 
         # Initialize Anthropic client for Claude
         self.anthropic = Anthropic()
 
         try:
+            # Get Neo4j credentials
             uri = os.environ.get("NEO4J_URI")
             username = os.environ.get("NEO4J_USER")
             password = os.environ.get("NEO4J_PASSWORD")
 
             if not all([uri, username, password]):
                 self.logger.error("Neo4j credentials not properly configured")
-                raise ValueError("Neo4j credentials not properly configured")
+                return  # Allow service to initialize without graph database
 
             # Parse URI for AuraDB
             parsed_uri = urlparse(uri)
@@ -42,19 +44,30 @@ class LlamaService:
 
         except Exception as e:
             self.logger.error(f"Failed to initialize Neo4j connections: {str(e)}")
-            raise
+            # Allow service to initialize without graph database
 
     def process_query(self, query_text: str) -> Dict:
         """Process a query using Neo4j and Anthropic"""
         try:
             self.logger.info(f"Processing query: {query_text}")
-            
+
+            # Check if graph database is available
+            if not self.graph:
+                self.logger.warning("Graph database not available, proceeding with conversational response only")
+                return {
+                    'chat_response': self.generate_response(query_text),
+                    'queries': {
+                        'query_analysis': {'query': query_text},
+                        'results': 'No matches found in knowledge graph'
+                    }
+                }
+
             # Execute knowledge graph queries
             results = self._execute_knowledge_graph_queries(query_text)
-            
+
             # Prepare context for AI response
             context_info = self._prepare_context(results)
-            
+
             # Generate AI response with or without context
             ai_response = self.generate_response(query_text, context_info)
 
@@ -75,6 +88,9 @@ class LlamaService:
 
     def _execute_knowledge_graph_queries(self, query_text: str) -> List[Dict]:
         """Execute knowledge graph queries based on the query text"""
+        if not self.graph:
+            return []
+
         try:
             # Simple query to match content
             query = """
@@ -84,7 +100,7 @@ class LlamaService:
             LIMIT 5
             """
             return self.graph.run(query, query=query_text).data()
-            
+
         except Exception as e:
             self.logger.error(f"Error executing knowledge graph queries: {str(e)}")
             return []
@@ -93,12 +109,12 @@ class LlamaService:
         """Prepare context for AI response from results"""
         if not results:
             return None
-            
+
         context_sections = []
         for result in results:
             if 'content' in result:
                 context_sections.append(result['content'])
-        
+
         return "\n".join(context_sections) if context_sections else None
 
     def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
