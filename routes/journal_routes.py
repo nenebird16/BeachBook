@@ -3,7 +3,7 @@ from flask import Blueprint, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 import logging
 from models.journal import JournalEntry
-from replit.object_storage import Client
+from replit.object_storage import Client as ObjectStorageClient
 
 logger = logging.getLogger(__name__)
 journal_routes = Blueprint('journal', __name__)
@@ -11,9 +11,9 @@ journal_routes = Blueprint('journal', __name__)
 ALLOWED_AUDIO_EXTENSIONS = {'wav', 'mp3', 'm4a'}
 # Initialize storage client with error handling
 try:
-    storage_client = Client()
-    # Test bucket access
-    storage_client.get_bucket()
+    storage_client = ObjectStorageClient()
+    # Test connection by listing files
+    storage_client.list()
 except Exception as e:
     logger.error(f"Failed to initialize storage client: {str(e)}")
     storage_client = None
@@ -44,12 +44,16 @@ def upload_audio():
             object_key = f"audio/{timestamp}_{filename}"
 
             if not storage_client:
-                return jsonify({'error': 'Object Storage not configured. Please create a bucket first.'}), 500
+                return jsonify({'error': 'Object Storage not configured'}), 500
 
             try:
                 # Upload to Object Storage
-                storage_client.upload_from_bytes(object_key, audio_file.read())
-                
+                storage_client.upload_bytes(
+                    data=audio_file.read(),
+                    path=object_key,
+                    mime_type=audio_file.content_type
+                )
+
                 # Get public URL
                 audio_url = storage_client.get_url(object_key)
             except Exception as e:
