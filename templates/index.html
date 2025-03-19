@@ -60,22 +60,43 @@ document.addEventListener('DOMContentLoaded', function() {
         container.scrollTop = container.scrollHeight;
     }
 
-    function displayQueries(data) {
-        let queryContent = '';
-        const queries = data.technical_details?.queries;
+    function formatDate(date) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
 
-        if (queries) {
-            // Display content query if available
+    function updateAuditTrail(queryText, data) {
+        const timestamp = formatDate(new Date());
+        const hasMatches = data.technical_details?.queries?.query_analysis?.found_matches || false;
+        const matchCount = data.technical_details?.queries?.query_analysis?.direct_matches || 0;
+
+        auditTrail.innerHTML += `
+            <div class="audit-entry mb-2">
+                <small class="text-muted">${timestamp}</small>
+                <div>Query: "${queryText}"</div>
+                <div>${hasMatches ? `Found ${matchCount} matches in knowledge graph` : 'No matches found'}</div>
+            </div>
+        `;
+        scrollToBottom(auditTrail);
+    }
+
+    function displayQueries(data) {
+        console.log("Displaying queries:", data); // Debug log
+
+        let queryContent = '';
+        if (data.technical_details && data.technical_details.queries) {
+            const queries = data.technical_details.queries;
+
+            // Always show content query
             if (queries.content_query) {
                 queryContent += `
                     <div class="cypher-query mb-3">
-                        <h6>Content Search Query:</h6>
+                        <h6>Main Search Query:</h6>
                         <pre><code>${queries.content_query}</code></pre>
                     </div>
                 `;
             }
 
-            // Display entity query if available
+            // Show entity query if available
             if (queries.entity_query) {
                 queryContent += `
                     <div class="cypher-query mb-3">
@@ -85,8 +106,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
             }
 
-            // Display search patterns if available
-            if (queries.parameters?.search_patterns) {
+            // Show search patterns
+            if (queries.parameters && queries.parameters.search_patterns) {
                 queryContent += `
                     <div class="cypher-query mb-3">
                         <h6>Search Patterns:</h6>
@@ -95,7 +116,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
             }
 
-            // Display query analysis if available
+            // Show analysis results
             if (queries.query_analysis) {
                 queryContent += `
                     <div class="cypher-query">
@@ -109,22 +130,11 @@ document.addEventListener('DOMContentLoaded', function() {
         cypherQueries.innerHTML = queryContent || '<div class="alert alert-info">No queries generated.</div>';
     }
 
-    queryInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            submitQuery();
-        }
-    });
-
-    queryInput.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = (this.scrollHeight) + 'px';
-    });
-
     function submitQuery() {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
 
+        // Add user message to chat
         chatHistory.innerHTML += `
             <div class="chat-message user-message mb-2">
                 <strong>You:</strong> ${queryText}
@@ -132,6 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         scrollToBottom(chatHistory);
 
+        // Send query to server
         fetch('/query', {
             method: 'POST',
             headers: {
@@ -145,8 +156,11 @@ document.addEventListener('DOMContentLoaded', function() {
             return response.json();
         })
         .then(data => {
+            console.log("Server response:", data); // Debug log
+
             if (data.error) throw new Error(data.error);
 
+            // Display bot response
             chatHistory.innerHTML += `
                 <div class="chat-message bot-message mb-2">
                     <strong>Bot:</strong> ${data.response}
@@ -154,25 +168,20 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
-            // Display queries
+            // Update query display
             displayQueries(data);
 
-            // Add to audit trail
-            const timestamp = new Date().toLocaleTimeString();
-            const hasMatches = data.technical_details?.queries?.query_analysis?.found_matches || false;
-            auditTrail.innerHTML += `
-                <div class="audit-entry mb-2">
-                    <small class="text-muted">${timestamp}</small>
-                    <div>Query: "${queryText}"</div>
-                    <div>${hasMatches ? 'Found matches in knowledge graph' : 'Conversational response (no matches)'}</div>
-                </div>
-            `;
-            scrollToBottom(auditTrail);
+            // Update audit trail
+            updateAuditTrail(queryText, data);
 
+            // Clear input
             queryInput.value = '';
             queryInput.style.height = 'auto';
         })
         .catch(error => {
+            console.error("Error:", error); // Debug log
+
+            // Display error in chat
             chatHistory.innerHTML += `
                 <div class="chat-message error-message mb-2">
                     <strong>Error:</strong> ${error.message}
@@ -180,7 +189,8 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
-            const timestamp = new Date().toLocaleTimeString();
+            // Add error to audit trail
+            const timestamp = formatDate(new Date());
             auditTrail.innerHTML += `
                 <div class="audit-entry error mb-2">
                     <small class="text-muted">${timestamp}</small>
@@ -191,6 +201,20 @@ document.addEventListener('DOMContentLoaded', function() {
             scrollToBottom(auditTrail);
         });
     }
+
+    // Handle Enter key in textarea
+    queryInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            submitQuery();
+        }
+    });
+
+    // Auto-expand textarea
+    queryInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
 });
 </script>
 
