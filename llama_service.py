@@ -30,7 +30,10 @@ class LlamaService:
             # Create case-insensitive pattern for each term
             search_patterns = [f"(?i).*{term}.*" for term in search_terms]
 
-            # Define base queries for searching
+            # Debug log the search patterns
+            self.logger.debug(f"Generated search patterns: {search_patterns}")
+
+            # Define queries
             content_query = """
             MATCH (n)
             WHERE any(pattern IN $search_patterns WHERE 
@@ -57,12 +60,9 @@ class LlamaService:
             LIMIT 3
             """
 
-            # Generate base chat response
-            chat_response = self.generate_response(query_text)
-
             # Initialize response structure
             response = {
-                'response': chat_response,
+                'response': None,  # Will be set later
                 'technical_details': {
                     'queries': {
                         'content_query': content_query,
@@ -84,6 +84,12 @@ class LlamaService:
                 }
             }
 
+            # Debug log the initial response structure
+            self.logger.debug("Initial response structure prepared")
+
+            # Generate base chat response
+            response['response'] = self.generate_response(query_text)
+
             # Try to query graph database if available
             if self.graph_db:
                 try:
@@ -91,32 +97,33 @@ class LlamaService:
 
                     # Execute content query
                     results = self.graph_db.query(content_query, {'search_patterns': search_patterns})
-                    self.logger.debug(f"Query results: {results}")
+                    self.logger.debug(f"Content query results: {results}")
 
                     if results:
                         # If we found direct matches, look for related content
                         self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
                         related_results = self.graph_db.query(entity_query, {'search_patterns': search_patterns})
+                        self.logger.debug(f"Related query results: {related_results}")
 
                         # Prepare context from results
                         context = self._prepare_context(results + related_results)
                         if context:
                             response['response'] = self.generate_response(query_text, context)
 
-                        # Update analysis with match information
+                        # Update analysis
                         response['technical_details']['queries']['query_analysis'].update({
                             'found_matches': True,
                             'direct_matches': len(results),
-                            'related_matches': len(related_results)
+                            'related_matches': len(related_results) if related_results else 0
                         })
-                    else:
-                        self.logger.info("No direct matches found in knowledge graph")
 
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
                     response['technical_details']['queries']['query_analysis']['database_state'] = 'error'
                     response['technical_details']['queries']['query_analysis']['error'] = str(e)
 
+            # Debug log the final response structure
+            self.logger.debug(f"Final response structure: {response}")
             return response
 
         except Exception as e:

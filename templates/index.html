@@ -85,20 +85,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function displayQueries(data) {
         console.log("Displaying queries:", data); // Debug log
+        const queries = data.technical_details?.queries;
 
-        if (!data.technical_details?.queries) {
+        if (!queries) {
             cypherQueries.innerHTML = '<div class="alert alert-info">No queries generated.</div>';
             return;
         }
 
-        const queries = data.technical_details.queries;
         let queryContent = '';
 
         // Display content query
         if (queries.content_query) {
             queryContent += `
                 <div class="cypher-query mb-3">
-                    <h6>Player Search Query:</h6>
+                    <h6>Main Search Query:</h6>
                     <pre><code>${queries.content_query.trim()}</code></pre>
                 </div>
             `;

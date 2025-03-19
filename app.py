@@ -66,7 +66,14 @@ def query_knowledge():
         try:
             # Initialize LlamaService with graph database from app config
             llama_service = LlamaService(graph_db=app.config.get('graph_db'))
+
+            # Process the query
             result = llama_service.process_query(query)
+
+            # Log the response structure for debugging
+            logger.debug("Query result structure:")
+            logger.debug(f"Response text: {result.get('response')}")
+            logger.debug(f"Technical details: {result.get('technical_details')}")
 
             if not result:
                 logger.error("LlamaService returned None response")
@@ -75,16 +82,18 @@ def query_knowledge():
                     'response': 'Sorry, I encountered an error while processing your request. Please try again.'
                 }), 500
 
-            # Ensure we have a chat response
-            response = result.get('response', 'I apologize, but I was unable to generate a response.')
-
-            return jsonify({
-                'response': response,
+            # Format response for frontend
+            response = {
+                'response': result.get('response', 'I apologize, but I was unable to generate a response.'),
                 'technical_details': {
-                    'queries': result.get('queries', {}),
-                    'results': result.get('results', 'No matches found in knowledge graph')
+                    'queries': result.get('technical_details', {}).get('queries', {})
                 }
-            }), 200
+            }
+
+            # Log the final response being sent to frontend
+            logger.debug(f"Sending response to frontend: {response}")
+
+            return jsonify(response), 200
 
         except Exception as e:
             logger.error(f"Error processing query with LlamaService: {str(e)}")
