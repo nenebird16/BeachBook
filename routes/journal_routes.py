@@ -9,7 +9,14 @@ logger = logging.getLogger(__name__)
 journal_routes = Blueprint('journal', __name__)
 
 ALLOWED_AUDIO_EXTENSIONS = {'wav', 'mp3', 'm4a'}
-storage_client = Client()
+# Initialize storage client with error handling
+try:
+    storage_client = Client()
+    # Test bucket access
+    storage_client.get_bucket()
+except Exception as e:
+    logger.error(f"Failed to initialize storage client: {str(e)}")
+    storage_client = None
 
 def allowed_audio_file(filename):
     return '.' in filename and \
@@ -36,11 +43,18 @@ def upload_audio():
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             object_key = f"audio/{timestamp}_{filename}"
 
-            # Upload to Object Storage
-            storage_client.upload_from_bytes(object_key, audio_file.read())
-            
-            # Get public URL
-            audio_url = storage_client.get_url(object_key)
+            if not storage_client:
+                return jsonify({'error': 'Object Storage not configured. Please create a bucket first.'}), 500
+
+            try:
+                # Upload to Object Storage
+                storage_client.upload_from_bytes(object_key, audio_file.read())
+                
+                # Get public URL
+                audio_url = storage_client.get_url(object_key)
+            except Exception as e:
+                logger.error(f"Storage error: {str(e)}")
+                return jsonify({'error': 'Failed to upload to storage. Please try again.'}), 500
 
             # Create journal entry in Neo4j
             entry = JournalEntry.create_audio_entry(audio_url)
