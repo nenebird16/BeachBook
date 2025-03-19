@@ -1,19 +1,15 @@
-import os
 from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 import logging
 from models.journal import JournalEntry
+from replit.object_storage import Client
 
 logger = logging.getLogger(__name__)
-
 journal_routes = Blueprint('journal', __name__)
 
-UPLOAD_FOLDER = 'uploads/audio'
 ALLOWED_AUDIO_EXTENSIONS = {'wav', 'mp3', 'm4a'}
-
-# Ensure upload directory exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+storage_client = Client()
 
 def allowed_audio_file(filename):
     return '.' in filename and \
@@ -38,13 +34,16 @@ def upload_audio():
         if audio_file and allowed_audio_file(audio_file.filename):
             filename = secure_filename(audio_file.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{timestamp}_{filename}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            object_key = f"audio/{timestamp}_{filename}"
 
-            audio_file.save(filepath)
+            # Upload to Object Storage
+            storage_client.upload_from_bytes(object_key, audio_file.read())
+            
+            # Get public URL
+            audio_url = storage_client.get_url(object_key)
 
             # Create journal entry in Neo4j
-            entry = JournalEntry.create_audio_entry(filepath)
+            entry = JournalEntry.create_audio_entry(audio_url)
 
             return jsonify({
                 'message': 'Audio uploaded successfully',
