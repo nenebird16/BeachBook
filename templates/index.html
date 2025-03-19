@@ -74,7 +74,6 @@ document.addEventListener('DOMContentLoaded', function() {
         this.style.height = (this.scrollHeight) + 'px';
     });
 
-    // Function to handle query submission
     function submitQuery() {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
@@ -111,21 +110,24 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
+            // Get the query analysis data
+            const queryAnalysis = data.technical_details?.queries?.query_analysis || {};
+            const hasMatches = queryAnalysis.found_matches || false;
+
             // Display technical details
             if (data.technical_details && data.technical_details.queries) {
                 const queries = data.technical_details.queries;
-                const analysis = queries.query_analysis || {};
 
                 let queryContent = `
                     <div class="cypher-query mb-3">
                         <h6>Query Analysis:</h6>
                         <div class="query-details">
-                            <p><strong>Query Type:</strong> ${analysis.query_type || 'Unknown'}</p>
-                            <p><strong>Database State:</strong> ${analysis.database_state || 'Unknown'}</p>
-                            <p><strong>Timestamp:</strong> ${analysis.analysis_timestamp || 'Unknown'}</p>
-                            <p><strong>Found Matches:</strong> ${analysis.found_matches || false}</p>
-                            <p><strong>Direct Matches:</strong> ${analysis.direct_matches || 0}</p>
-                            <p><strong>Related Matches:</strong> ${analysis.related_matches || 0}</p>
+                            <p><strong>Query Type:</strong> ${queryAnalysis.query_type || 'Unknown'}</p>
+                            <p><strong>Database State:</strong> ${queryAnalysis.database_state || 'Unknown'}</p>
+                            <p><strong>Timestamp:</strong> ${queryAnalysis.analysis_timestamp || 'Unknown'}</p>
+                            <p><strong>Found Matches:</strong> ${hasMatches}</p>
+                            <p><strong>Direct Matches:</strong> ${queryAnalysis.direct_matches || 0}</p>
+                            <p><strong>Related Matches:</strong> ${queryAnalysis.related_matches || 0}</p>
                         </div>
                     </div>
                 `;
@@ -136,7 +138,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <h6>Content Search Query:</h6>
                             <pre><code>${queries.content_query}</code></pre>
                             <p><strong>Parameters:</strong></p>
-                            <pre><code>${JSON.stringify(queries.parameters, null, 2)}</code></pre>
+                            <pre><code>${JSON.stringify(queries.parameters || {}, null, 2)}</code></pre>
                         </div>
                     `;
                 }
@@ -155,7 +157,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Add to audit trail
             const timestamp = new Date().toLocaleTimeString();
-            const hasMatches = analysis && analysis.found_matches;
             auditTrail.innerHTML += `
                 <div class="audit-entry mb-2">
                     <small class="text-muted">${timestamp}</small>
