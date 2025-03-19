@@ -33,6 +33,7 @@ class LlamaService:
                 scheme = scheme_mapping.get(original_scheme, 'bolt')
 
                 self.logger.info(f"Connecting to Neo4j with scheme: {scheme} (mapped from {original_scheme})")
+                self.logger.debug(f"Host: {parsed_uri.hostname}, Port: {parsed_uri.port or 7687}")
 
                 profile = ConnectionProfile(
                     scheme=scheme,
@@ -42,43 +43,85 @@ class LlamaService:
                     user=username,
                     password=password
                 )
+
                 self.graph = Graph(profile=profile)
-                self.logger.info("Successfully connected to Neo4j database")
+
+                # Test the connection and check for data
+                result = self.graph.run("MATCH (n) RETURN count(n) as count").data()
+                node_count = result[0]['count'] if result else 0
+                self.logger.info(f"Successfully connected to Neo4j database. Found {node_count} nodes.")
+
+                # If no nodes exist, log a warning
+                if node_count == 0:
+                    self.logger.warning("Neo4j database is empty. No nodes found.")
             else:
                 self.logger.warning("Neo4j credentials not found, running in chat-only mode")
         except Exception as e:
-            self.logger.warning(f"Failed to connect to Neo4j: {str(e)}, running in chat-only mode")
+            self.logger.error(f"Failed to connect to Neo4j: {str(e)}, running in chat-only mode")
+            self.graph = None
 
     def process_query(self, query_text: str) -> Dict:
         """Process a query using Claude and optionally Neo4j"""
         try:
             # Always start with a basic chat response
             chat_response = self.generate_response(query_text)
+            query_analysis = {
+                'input_query': query_text,
+                'database_state': 'disconnected'
+            }
 
             # Try to enhance with graph data if available
             if self.graph:
                 try:
-                    results = self._execute_knowledge_graph_queries(query_text)
-                    if results:
-                        context = self._prepare_context(results)
-                        if context:
-                            chat_response = self.generate_response(query_text, context)
+                    self.logger.info("Attempting to query Neo4j database")
+                    query_analysis['database_state'] = 'connected'
 
-                    return {
-                        'response': chat_response,
-                        'technical_details': {
-                            'queries': {'query': query_text},
-                            'results': results
+                    # First check if we have any nodes at all
+                    count_result = self.graph.run("MATCH (n) RETURN count(n) as count").data()
+                    node_count = count_result[0]['count'] if count_result else 0
+                    query_analysis['total_nodes'] = node_count
+
+                    if node_count == 0:
+                        self.logger.warning("Database is empty, no nodes to query")
+                        query_analysis['status'] = 'empty_database'
+                    else:
+                        results = self._execute_knowledge_graph_queries(query_text)
+                        query_analysis['status'] = 'executed_query'
+
+                        if results:
+                            self.logger.info(f"Found {len(results)} results in knowledge graph")
+                            context = self._prepare_context(results)
+                            if context:
+                                chat_response = self.generate_response(query_text, context)
+                                query_analysis['found_matches'] = True
+                                query_analysis['match_count'] = len(results)
+                        else:
+                            self.logger.info("No results found in knowledge graph")
+                            query_analysis['found_matches'] = False
+
+                        return {
+                            'response': chat_response,
+                            'technical_details': {
+                                'queries': {
+                                    'query_analysis': query_analysis,
+                                    'content_query': "MATCH (n) WHERE n.content CONTAINS $query RETURN n.content as content LIMIT 5"
+                                },
+                                'results': results if results else 'No matches found in knowledge graph'
+                            }
                         }
-                    }
+
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
+                    query_analysis['error'] = str(e)
+                    query_analysis['status'] = 'error'
 
             # Return basic chat response if no graph data
             return {
                 'response': chat_response,
                 'technical_details': {
-                    'queries': {'query': query_text},
+                    'queries': {
+                        'query_analysis': query_analysis
+                    },
                     'results': 'No matches found in knowledge graph'
                 }
             }
@@ -135,13 +178,18 @@ class LlamaService:
             return []
 
         try:
+            # Test connection before executing query
+            self.graph.run("MATCH (n) RETURN count(n) as count LIMIT 1")
+
             query = """
             MATCH (n)
             WHERE n.content CONTAINS $query
             RETURN n.content as content
             LIMIT 5
             """
-            return self.graph.run(query, query=query_text).data()
+            results = self.graph.run(query, query=query_text).data()
+            self.logger.info(f"Query executed successfully, found {len(results)} results")
+            return results
         except Exception as e:
             self.logger.error(f"Error executing graph query: {str(e)}")
             return []
