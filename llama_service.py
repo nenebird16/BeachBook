@@ -21,19 +21,7 @@ class LlamaService:
             # Get current timestamp for all events
             current_time = datetime.now().isoformat()
 
-            # Extract entities from query
-            query_entities = self.semantic_processor.extract_entities_from_query(query_text)
-            self.logger.info(f"Extracted entities from query: {query_entities}")
-
-            # Build search patterns
-            search_terms = [entity['text'] for entity in query_entities]
-            if not search_terms:  # If no entities found, use the whole query
-                search_terms = [query_text]
-
-            # Create case-insensitive pattern for each term
-            search_patterns = [f"(?i).*{term}.*" for term in search_terms]
-
-            # Define the queries regardless of database connection
+            # Define the base queries that will be shown regardless of DB state
             content_query = """
             MATCH (n:Player)
             WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
@@ -55,6 +43,21 @@ class LlamaService:
             LIMIT 3
             """
 
+            # Extract entities from query
+            query_entities = self.semantic_processor.extract_entities_from_query(query_text)
+            self.logger.info(f"Extracted entities from query: {query_entities}")
+
+            # Build search patterns
+            search_terms = [entity['text'] for entity in query_entities]
+            if not search_terms:  # If no entities found, use the whole query
+                search_terms = [query_text]
+
+            # Create case-insensitive pattern for each term
+            search_patterns = [f"(?i).*{term}.*" for term in search_terms]
+
+            # Generate base chat response
+            chat_response = self.generate_response(query_text)
+
             # Initialize query analysis
             query_analysis = {
                 'input_query': query_text,
@@ -68,32 +71,28 @@ class LlamaService:
                 'entities_found': query_entities
             }
 
-            # Generate base chat response
-            chat_response = self.generate_response(query_text)
+            # Try to query graph database if available
+            results = []
+            related_results = []
 
-            # Try to enhance with graph data if available
             if self.graph_db:
                 try:
                     self.logger.info("Attempting to query graph database")
 
                     # Execute primary content search
                     results = self.graph_db.query(content_query, {'search_patterns': search_patterns})
-                    related_results = []
 
                     if results:
                         # If we found direct matches, look for related content
                         self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
-                        related_results = self.graph_db.query(
-                            entity_query,
-                            {'search_patterns': search_patterns}
-                        )
+                        related_results = self.graph_db.query(entity_query, {'search_patterns': search_patterns})
 
                         # Prepare context from results
                         context = self._prepare_context(results + related_results)
                         if context:
                             chat_response = self.generate_response(query_text, context)
 
-                        # Update analysis with match information
+                        # Update analysis
                         query_analysis.update({
                             'found_matches': True,
                             'direct_matches': len(results),
@@ -107,7 +106,7 @@ class LlamaService:
                     query_analysis['error'] = str(e)
                     query_analysis['database_state'] = 'error'
 
-            # Always return the queries in the response
+            # Always return the queries and analysis in the response
             return {
                 'response': chat_response,
                 'technical_details': {

@@ -37,7 +37,7 @@
         <div class="col-12">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Query Analysis & Generated Cypher</h5>
+                    <h5 class="card-title mb-0">Generated Cypher Queries</h5>
                 </div>
                 <div class="card-body">
                     <div id="cypherQueries" class="cypher-query-container-wide"></div>
@@ -110,15 +110,9 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
-            // Get the query analysis data
-            const queryAnalysis = data.technical_details?.queries?.query_analysis || {};
-            const hasMatches = queryAnalysis.found_matches || false;
-
-            // Display technical details
+            // Always try to display queries
             let queryContent = '';
-
-            // Always show the queries if they exist, regardless of execution status
-            if (data.technical_details && data.technical_details.queries) {
+            if (data.technical_details?.queries) {
                 const queries = data.technical_details.queries;
 
                 if (queries.content_query) {
@@ -139,8 +133,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     `;
                 }
 
-                // Show search patterns used
-                if (queries.parameters && queries.parameters.search_patterns) {
+                if (queries.parameters?.search_patterns) {
                     queryContent += `
                         <div class="cypher-query">
                             <h6>Search Patterns:</h6>
@@ -152,9 +145,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
             cypherQueries.innerHTML = queryContent || '<div class="alert alert-info">No queries generated.</div>';
 
-
             // Add to audit trail
             const timestamp = new Date().toLocaleTimeString();
+            const hasMatches = data.technical_details?.queries?.query_analysis?.found_matches || false;
             auditTrail.innerHTML += `
                 <div class="audit-entry mb-2">
                     <small class="text-muted">${timestamp}</small>
@@ -245,21 +238,6 @@ document.addEventListener('DOMContentLoaded', function() {
 .cypher-query-container-wide {
     max-height: 300px;
     overflow-y: auto;
-}
-
-.query-details {
-    background-color: rgba(var(--bs-dark-rgb), 0.05);
-    padding: 1rem;
-    border-radius: 0.25rem;
-    margin-top: 0.5rem;
-}
-
-.query-details p {
-    margin-bottom: 0.5rem;
-}
-
-.query-details p:last-child {
-    margin-bottom: 0;
 }
 </style>
 {% endblock %}
