@@ -4,7 +4,6 @@ from typing import List, Dict, Optional
 import spacy
 import nltk
 from nltk.tokenize import sent_tokenize
-import json
 
 # Download required NLTK data
 nltk.download('punkt', quiet=True)
@@ -49,7 +48,7 @@ class SemanticProcessor:
             # Extract entities and relationships
             doc = self.nlp(content)
             entities = []
-            relationships = []
+            relationships = [] # Added initialization for relationships
 
             for ent in doc.ents:
                 entities.append({
@@ -110,24 +109,28 @@ class SemanticProcessor:
 
     def _create_chunks(self, text: str, chunk_size: int = 512) -> List[str]:
         """Split text into semantic chunks"""
-        # First split into sentences
-        sentences = sent_tokenize(text)
-        chunks = []
-        current_chunk = []
-        current_length = 0
+        try:
+            # First split into sentences
+            sentences = sent_tokenize(text)
+            chunks = []
+            current_chunk = []
+            current_length = 0
 
-        for sent in sentences:
-            # +1 for space separator
-            if current_length + len(sent) + 1 > chunk_size:
-                if current_chunk:
-                    chunks.append(" ".join(current_chunk))
-                current_chunk = [sent]
-                current_length = len(sent)
-            else:
-                current_chunk.append(sent)
-                current_length += len(sent) + 1
+            for sent in sentences:
+                # +1 for space separator
+                if current_length + len(sent) + 1 > chunk_size:
+                    if current_chunk:
+                        chunks.append(" ".join(current_chunk))
+                    current_chunk = [sent]
+                    current_length = len(sent)
+                else:
+                    current_chunk.append(sent)
+                    current_length += len(sent) + 1
 
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
 
-        return chunks
+            return chunks
+        except Exception as e:
+            self.logger.error(f"Error creating chunks: {str(e)}")
+            return [text]  # Return the full text as a single chunk if chunking fails
