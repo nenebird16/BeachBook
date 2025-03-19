@@ -132,8 +132,8 @@ class DocumentProcessor:
             if self.semantic_processor:
                 self.logger.info("Processing document with semantic processor...")
                 semantic_data = self.semantic_processor.process_document(file_content)
-                doc_info['embeddings'] = semantic_data.get('embeddings')
-                doc_info['chunks'] = semantic_data.get('chunks')
+                doc_info['embeddings'] = semantic_data.get('embeddings', [])
+                doc_info['chunks'] = semantic_data.get('chunks', [])
                 self.logger.info(f"Document processed with {len(semantic_data.get('entities', []))} entities extracted")
 
             # Process with LlamaIndex
@@ -152,18 +152,6 @@ class DocumentProcessor:
             self._create_entity_nodes(doc_node, entities)
             self.logger.info(f"Created {len(entities)} entity relationships")
 
-            # Extract and create visual element nodes if present
-            visual_elements = self._extract_visual_elements(file_content)
-            if visual_elements:
-                self._create_visual_element_nodes(doc_node, visual_elements)
-                self.logger.info(f"Created {len(visual_elements)} visual element nodes")
-
-            # Extract and create relationships between entities
-            relationships = self._extract_relationships(file_content, entities)
-            if relationships:
-                self._create_relationship_edges(relationships)
-                self.logger.info(f"Created {len(relationships)} relationship edges")
-
             return doc_info
 
         except Exception as e:
@@ -172,23 +160,29 @@ class DocumentProcessor:
 
     def _extract_file_content(self, file) -> str:
         """Extract content from file based on file type"""
-        if file.filename.endswith('.txt'):
-            return file.read().decode('utf-8')
-        elif file.filename.endswith('.csv'):
-            import pandas as pd
-            content = file.read()
-            df = pd.read_csv(file)
-            return df.to_json(orient='records')
-        elif file.filename.endswith(('.pdf', '.doc', '.docx')):
-            raise NotImplementedError(
-                "Binary file processing is not yet implemented. "
-                "Currently supported formats: .txt, .csv"
-            )
-        else:
-            raise ValueError(
-                "Unsupported file type. "
-                "Currently supported formats: .txt, .csv"
-            )
+        try:
+            if file.filename.endswith('.txt'):
+                content = file.read()
+                if isinstance(content, bytes):
+                    return content.decode('utf-8')
+                return content
+            elif file.filename.endswith('.csv'):
+                import pandas as pd
+                df = pd.read_csv(file)
+                return df.to_json(orient='records')
+            elif file.filename.endswith(('.pdf', '.doc', '.docx')):
+                raise NotImplementedError(
+                    "Binary file processing is not yet implemented. "
+                    "Currently supported formats: .txt, .csv"
+                )
+            else:
+                raise ValueError(
+                    "Unsupported file type. "
+                    "Currently supported formats: .txt, .csv"
+                )
+        except Exception as e:
+            self.logger.error(f"Error extracting file content: {str(e)}")
+            raise
 
     def _extract_metadata(self, content: str) -> Dict:
         """Extract metadata from document content"""

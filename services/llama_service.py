@@ -98,13 +98,14 @@ class LlamaService:
             doc_info = self.semantic_processor.process_document(content)
 
             # Store embeddings in Neo4j
-            for chunk in doc_info['embeddings']:
-                query = """
-                MATCH (d:Document {content: $content})
-                SET d.embedding = $embedding
-                """
-                self.graph.run(query, content=chunk['text'], 
-                             embedding=chunk['embedding'])
+            if doc_info and 'embeddings' in doc_info:
+                for chunk in doc_info['embeddings']:
+                    query = """
+                    MATCH (d:Document {content: $content})
+                    SET d.embedding = $embedding
+                    """
+                    self.graph.run(query, content=chunk['text'], 
+                                embedding=chunk['embedding'])
 
             return True
 
@@ -131,7 +132,7 @@ class LlamaService:
             else:
                 # Check if this is a query about graph contents
                 is_content_query = any(keyword in query.lower() 
-                                     for keyword in ['what', 'tell me about', 'show me', 'list', 'topics'])
+                                        for keyword in ['what', 'tell me about', 'show me', 'list', 'topics'])
 
                 if is_content_query:
                     # Get graph overview
