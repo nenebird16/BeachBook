@@ -1,85 +1,43 @@
 import os
 import logging
-from py2neo import Graph
+from storage.neo4j_impl import Neo4jDatabase
 from urllib.parse import urlparse
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-def test_connections():
+def test_neo4j_connection():
+    """Test Neo4j database connection"""
     try:
-        # Get credentials from environment
-        neo4j_user = os.environ.get("NEO4J_USER")
-        neo4j_password = os.environ.get("NEO4J_PASSWORD")
-        uri = os.environ.get("NEO4J_URI")
+        # Initialize Neo4j database
+        db = Neo4jDatabase()
+        logger.info("Testing Neo4j connection...")
 
-        # Verify environment variables
-        logger.debug(f"NEO4J_USER present: {'Yes' if neo4j_user else 'No'}")
-        logger.debug(f"NEO4J_PASSWORD present: {'Yes' if neo4j_password else 'No'}")
+        # Try to connect
+        if db.connect():
+            logger.info("✓ Successfully connected to Neo4j")
 
-        if not all([uri, neo4j_user, neo4j_password]):
-            raise ValueError("Neo4j credentials not properly configured")
+            # Test query execution
+            try:
+                # Run a simple test query
+                result = db.query("MATCH (n) RETURN count(n) as count")
+                logger.info(f"Total nodes in database: {result[0]['count'] if result else 0}")
 
-        # Parse URI to get hostname
-        parsed_uri = urlparse(uri)
-        host = parsed_uri.hostname
-        port = 7687  # Default Neo4j bolt port
+                # Check for Player nodes specifically
+                player_result = db.query("""
+                    MATCH (p:Player) 
+                    RETURN count(p) as count
+                """)
+                logger.info(f"Total Player nodes: {player_result[0]['count'] if player_result else 0}")
 
-        # Create direct bolt connection string
-        bolt_uri = f"bolt+s://{host}:{port}"
-        logger.info(f"Connecting to Neo4j at: {bolt_uri}")
+                return True
 
-        # Test direct Neo4j connection
-        logger.info("Testing direct Neo4j connection...")
-        try:
-            graph = Graph(bolt_uri, auth=(neo4j_user, neo4j_password))
-
-            # Test basic connectivity
-            result = graph.run("RETURN 1 as test").data()
-            logger.info("✓ Direct Neo4j connection successful")
-            logger.debug(f"Test query result: {result}")
-
-            # Check for nodes and their properties
-            node_count = graph.run("MATCH (n) RETURN count(n) as count").data()
-            logger.info(f"Total nodes in database: {node_count[0]['count'] if node_count else 0}")
-
-            # Check for nodes with content property
-            content_nodes = graph.run("""
-                MATCH (n) 
-                WHERE exists(n.content)
-                RETURN count(n) as count, 
-                       labels(n)[0] as label
-                """).data()
-
-            if content_nodes:
-                logger.info("Nodes with content property:")
-                for result in content_nodes:
-                    logger.info(f"- {result['label']}: {result['count']} nodes")
-            else:
-                logger.warning("No nodes found with 'content' property")
-
-            # Sample node properties
-            sample_nodes = graph.run("""
-                MATCH (n) 
-                RETURN labels(n) as labels, 
-                       properties(n) as props 
-                LIMIT 1
-                """).data()
-
-            if sample_nodes:
-                logger.info("Sample node structure:")
-                for node in sample_nodes:
-                    logger.info(f"Labels: {node['labels']}")
-                    logger.info(f"Properties: {node['props']}")
-            else:
-                logger.warning("No nodes found in database")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to connect to Neo4j: {str(e)}")
-            logger.error(f"Error type: {type(e)}")
+            except Exception as e:
+                logger.error(f"Query execution failed: {str(e)}")
+                return False
+        else:
+            logger.error("Failed to connect to Neo4j")
             return False
 
     except Exception as e:
@@ -88,4 +46,4 @@ def test_connections():
         return False
 
 if __name__ == "__main__":
-    test_connections()
+    test_neo4j_connection()

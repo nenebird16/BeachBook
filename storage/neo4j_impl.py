@@ -2,7 +2,7 @@ import os
 import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
-from py2neo import Graph
+from neo4j import GraphDatabase, Driver
 from .base import GraphDatabaseInterface
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
     def __init__(self):
         """Initialize the database connection details"""
-        self.graph = None
+        self.driver = None
         self.logger = logging.getLogger(__name__)
 
     def connect(self) -> bool:
@@ -27,48 +27,41 @@ class Neo4jDatabase(GraphDatabaseInterface):
                 self.logger.error("Missing Neo4j credentials")
                 return False
 
-            # Parse URI and log components
+            # Parse URI for connection details
             parsed_uri = urlparse(uri)
             self.logger.debug("Connecting to Neo4j database:")
             self.logger.debug(f"Original URI scheme: {parsed_uri.scheme}")
             self.logger.debug(f"Host: {parsed_uri.hostname}")
             self.logger.debug(f"Port: {parsed_uri.port or 7687}")
 
-            # Handle protocol conversion for AuraDB
-            if parsed_uri.scheme == 'neo4j+s':
-                # Convert neo4j+s:// to bolt+s:// for AuraDB
-                connection_uri = f"bolt+s://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
-                self.logger.info("Using AuraDB secure connection")
-                ssl_enabled = True
-            elif parsed_uri.scheme == 'neo4j':
-                # Convert neo4j:// to bolt:// for non-secure connections
-                connection_uri = f"bolt://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
-                self.logger.info("Using non-secure connection")
-                ssl_enabled = False
+            # Map Neo4j protocols to bolt protocols
+            protocol_mapping = {
+                'neo4j': 'bolt',
+                'neo4j+s': 'bolt+s',
+                'neo4j+ssc': 'bolt+ssc'
+            }
+
+            # Convert protocol if needed, defaulting to original if not in mapping
+            if parsed_uri.scheme in protocol_mapping:
+                scheme = protocol_mapping[parsed_uri.scheme]
+                connection_uri = f"{scheme}://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
             else:
-                # Use original URI for other protocols (bolt://, bolt+s://)
                 connection_uri = uri
-                ssl_enabled = '+s' in parsed_uri.scheme
 
             self.logger.info(f"Connecting using URI: {connection_uri}")
 
-            # Initialize Graph connection with appropriate SSL settings
-            self.graph = Graph(
+            # Create the driver instance
+            self.driver = GraphDatabase.driver(
                 connection_uri,
-                auth=(username, password),
-                name="neo4j",  # Default database name for AuraDB
-                secure=ssl_enabled
+                auth=(username, password)
             )
 
-            # Test connection
-            test_result = self.graph.run("RETURN 1 as test").data()
-            self.logger.debug(f"Connection test result: {test_result}")
+            # Verify connection with a simple query
+            with self.driver.session() as session:
+                result = session.run("RETURN 1 as test").single()
+                self.logger.debug(f"Connection test result: {result}")
 
-            # Get database info
-            count_result = self.graph.run("MATCH (n) RETURN count(n) as count").data()
-            node_count = count_result[0]['count'] if count_result else 0
-            self.logger.info(f"Successfully connected to Neo4j. Found {node_count} nodes.")
-
+            self.logger.info("Successfully connected to Neo4j")
             return True
 
         except Exception as e:
@@ -79,15 +72,16 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
     def query(self, query_string: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Execute a database query"""
-        if not self.graph:
+        if not self.driver:
             raise RuntimeError("Database connection not established. Call connect() first.")
 
         try:
             self.logger.debug(f"Executing query: {query_string}")
             self.logger.debug(f"Query parameters: {params}")
 
-            result = self.graph.run(query_string, parameters=params or {})
-            data = result.data()
+            with self.driver.session() as session:
+                result = session.run(query_string, parameters=params or {})
+                data = [dict(record) for record in result]
 
             self.logger.debug(f"Query returned {len(data)} results")
             return data
@@ -98,19 +92,17 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
     def create_node(self, label: str, properties: Dict[str, Any]) -> Dict[str, Any]:
         """Create a node with given label and properties"""
-        if not self.graph:
+        if not self.driver:
             raise RuntimeError("Database connection not established. Call connect() first.")
 
         try:
             self.logger.debug(f"Creating node with label: {label}")
             self.logger.debug(f"Node properties: {properties}")
 
-            result = self.graph.run(
-                "CREATE (n:{}) SET n = $props RETURN n".format(label),
-                props=properties
-            ).evaluate()
-
-            return dict(result) if result else {}
+            query = f"CREATE (n:{label}) SET n = $props RETURN n"
+            with self.driver.session() as session:
+                result = session.run(query, props=properties).single()
+                return dict(result['n']) if result else {}
 
         except Exception as e:
             self.logger.error(f"Error creating node: {str(e)}")
@@ -119,26 +111,30 @@ class Neo4jDatabase(GraphDatabaseInterface):
     def create_relationship(self, start_node_id: int, end_node_id: int,
                           relationship_type: str, properties: Optional[Dict[str, Any]] = None) -> bool:
         """Create a relationship between nodes"""
-        if not self.graph:
+        if not self.driver:
             raise RuntimeError("Database connection not established. Call connect() first.")
 
         try:
             self.logger.debug(f"Creating relationship: ({start_node_id})-[:{relationship_type}]->({end_node_id})")
             self.logger.debug(f"Relationship properties: {properties}")
 
-            result = self.graph.run("""
-                MATCH (start), (end)
-                WHERE ID(start) = $start_id AND ID(end) = $end_id
-                CREATE (start)-[r:$rel_type $props]->(end)
-                RETURN r
-                """,
-                start_id=start_node_id,
-                end_id=end_node_id,
-                rel_type=relationship_type,
-                props=properties or {}
-            )
+            query = """
+            MATCH (start), (end)
+            WHERE ID(start) = $start_id AND ID(end) = $end_id
+            CREATE (start)-[r:$rel_type]->(end)
+            SET r = $props
+            RETURN r
+            """
 
-            return bool(result)
+            with self.driver.session() as session:
+                result = session.run(
+                    query,
+                    start_id=start_node_id,
+                    end_id=end_node_id,
+                    rel_type=relationship_type,
+                    props=properties or {}
+                ).single()
+                return bool(result)
 
         except Exception as e:
             self.logger.error(f"Error creating relationship: {str(e)}")
@@ -146,18 +142,16 @@ class Neo4jDatabase(GraphDatabaseInterface):
 
     def get_by_id(self, node_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve a node by its ID"""
-        if not self.graph:
+        if not self.driver:
             raise RuntimeError("Database connection not established. Call connect() first.")
 
         try:
             self.logger.debug(f"Fetching node with ID: {node_id}")
 
-            result = self.graph.run(
-                "MATCH (n) WHERE ID(n) = $node_id RETURN n",
-                node_id=node_id
-            ).data()
-
-            return dict(result[0]['n']) if result else None
+            query = "MATCH (n) WHERE ID(n) = $node_id RETURN n"
+            with self.driver.session() as session:
+                result = session.run(query, node_id=node_id).single()
+                return dict(result['n']) if result else None
 
         except Exception as e:
             self.logger.error(f"Error fetching node by ID: {str(e)}")
