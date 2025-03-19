@@ -71,6 +71,10 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Success Message -->
+                    <div id="successMessage" class="alert alert-success mt-3 d-none">
+                        Document uploaded and processed successfully!
+                    </div>
                 </div>
             </div>
         </div>
@@ -81,7 +85,6 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize panels
     const chatHistory = document.getElementById('chatHistory');
     const cypherQueries = document.getElementById('cypherQueries');
     const auditTrail = document.getElementById('auditTrail');
@@ -91,13 +94,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const processingStatus = document.getElementById('processingStatus');
     const progressBar = processingStatus.querySelector('.progress-bar');
     const progressText = processingStatus.querySelector('.progress-text');
+    const successMessage = document.getElementById('successMessage');
 
-    // Function to scroll a container to bottom with smooth animation
     function scrollToBottom(container) {
         container.scrollTop = container.scrollHeight;
     }
 
-    // Update processing status
     function updateProcessingStatus(stage, progress) {
         const stages = {
             'uploading': 'Uploading document...',
@@ -115,21 +117,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (stage === 'complete') {
             progressBar.classList.remove('bg-danger');
-            // Keep success state visible longer
+            // Keep success state visible
+            progressBar.style.width = '100%';
+
+            // Show success message and reset form after delay
             setTimeout(() => {
-                progressBar.style.width = '100%';  // Ensure bar reaches 100%
-                // Show success message after progress bar is complete
+                successMessage.classList.remove('d-none');
+                document.getElementById('documentFile').value = '';
+
+                // Hide progress bar and success message after 5 seconds
                 setTimeout(() => {
-                    alert('Document uploaded and processed successfully!');
                     processingStatus.classList.add('d-none');
+                    successMessage.classList.add('d-none');
                     progressBar.style.width = '0%';
-                    // Reset file input after successful upload
-                    document.getElementById('documentFile').value = '';
-                }, 500);
-            }, 100);
+                }, 5000);
+            }, 1000);
         } else if (stage === 'error') {
             progressBar.classList.add('bg-danger');
         } else {
+            successMessage.classList.add('d-none');
             progressBar.classList.remove('bg-danger');
         }
     }
@@ -137,6 +143,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle document upload with Server-Sent Events
     uploadForm.addEventListener('submit', async function(e) {
         e.preventDefault();
+
+        // Hide any previous success message
+        successMessage.classList.add('d-none');
+
         const formData = new FormData();
         const file = document.getElementById('documentFile').files[0];
         if (!file) return;
@@ -197,11 +207,6 @@ document.addEventListener('DOMContentLoaded', function() {
                             </div>
                         `;
                         scrollToBottom(auditTrail);
-
-                        // Show success message immediately
-                        setTimeout(() => {
-                            alert('Document uploaded and processed successfully!');
-                        }, 100);
                     }
                 } catch (error) {
                     console.error('Error processing event:', error);
@@ -422,6 +427,15 @@ document.addEventListener('DOMContentLoaded', function() {
 .cypher-query-container-wide {
     max-height: 300px;
     overflow-y: auto;
+}
+
+.alert {
+    margin-bottom: 0;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.alert.d-none {
+    display: none !important;
 }
 </style>
 {% endblock %}
