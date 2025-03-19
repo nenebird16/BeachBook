@@ -1,6 +1,7 @@
 import os
 import logging
 import config  # Import config first to load environment variables
+from flask import Flask, request, render_template, jsonify, Response, stream_with_context
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -13,7 +14,6 @@ logger.debug(f"Config NEO4J_URI: {'Present' if config.NEO4J_URI else 'Not presen
 # Remove NEO4J_URI from environment after config is loaded
 original_uri = os.environ.pop('NEO4J_URI', None)
 
-from flask import Flask, request, render_template, jsonify
 from services.document_processor import DocumentProcessor
 from services.graph_service import GraphService
 from services.llama_service import LlamaService
@@ -22,6 +22,7 @@ from services.llama_service import LlamaService
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET")
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Initialize services
 try:
@@ -38,6 +39,25 @@ except Exception as e:
 def index():
     return render_template('index.html')
 
+def generate_progress_events(file):
+    """Generator function to yield progress events"""
+    try:
+        yield "data: {\"stage\": \"uploading\", \"progress\": 20}\n\n"
+
+        # Process document
+        doc_info = doc_processor.process_document(file)
+
+        # Stream progress updates based on doc_info stage
+        if 'stage' in doc_info and 'progress' in doc_info:
+            yield f"data: {{\"stage\": \"{doc_info['stage']}\", \"progress\": {doc_info['progress']}}}\n\n"
+
+        # Send completion event
+        yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
+
+    except Exception as e:
+        logger.error(f"Error during document processing: {str(e)}")
+        yield f"data: {{\"stage\": \"error\", \"error\": \"{str(e)}\"}}\n\n"
+
 @app.route('/upload', methods=['POST'])
 def upload_document():
     try:
@@ -50,23 +70,16 @@ def upload_document():
 
         logger.info(f"Starting document processing for {file.filename}")
 
-        # Process the document with stages
-        try:
-            # Initial processing
-            doc_info = doc_processor.process_document(file)
-
-            # Return success response
-            return jsonify({
-                'message': 'Document processed successfully',
-                'doc_info': {
-                    'title': doc_info.get('title'),
-                    'timestamp': doc_info.get('timestamp')
-                }
-            })
-
-        except Exception as e:
-            logger.error(f"Error during document processing: {str(e)}")
-            return jsonify({'error': str(e)}), 500
+        # Return SSE response with progress updates
+        return Response(
+            stream_with_context(generate_progress_events(file)),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no'
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")

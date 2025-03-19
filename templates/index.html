@@ -219,7 +219,7 @@ Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
         this.style.height = (this.scrollHeight) + 'px';
     });
 
-    // Handle document upload
+    // Handle document upload with Server-Sent Events
     uploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         const formData = new FormData();
@@ -230,54 +230,64 @@ Focus: ${JSON.stringify(queryAnalysis.focus, null, 2)}</code></pre>
 
         // Show loading indicators
         uploadSpinner.classList.remove('d-none');
-        updateProcessingStatus('uploading', 20);
+        processingStatus.classList.remove('d-none');
 
+        // Create EventSource for progress updates
+        const progressSource = new EventSource(`/upload?filename=${encodeURIComponent(file.name)}`);
+
+        // Handle progress events
+        progressSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+
+            if (data.error) {
+                // Handle error
+                updateProcessingStatus('error', 100);
+                progressSource.close();
+                uploadSpinner.classList.add('d-none');
+
+                // Add error to audit trail
+                auditTrail.innerHTML += `
+                    <div class="audit-entry error mb-2">
+                        <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+                        <div>Upload failed: ${file.name}</div>
+                        <div>Error: ${data.error}</div>
+                    </div>
+                `;
+                scrollToBottom(auditTrail);
+                return;
+            }
+
+            // Update progress bar
+            updateProcessingStatus(data.stage, data.progress);
+
+            // If processing is complete
+            if (data.stage === 'complete') {
+                progressSource.close();
+                uploadSpinner.classList.add('d-none');
+
+                // Add success to audit trail
+                auditTrail.innerHTML += `
+                    <div class="audit-entry mb-2">
+                        <small class="text-muted">${new Date().toLocaleTimeString()}</small>
+                        <div>Uploaded: ${file.name}</div>
+                        <div>Status: Success</div>
+                    </div>
+                `;
+                scrollToBottom(auditTrail);
+            }
+        };
+
+        // Handle any errors with the EventSource connection
+        progressSource.onerror = function() {
+            progressSource.close();
+            uploadSpinner.classList.add('d-none');
+            updateProcessingStatus('error', 100);
+        };
+
+        // Start the actual upload
         fetch('/upload', {
             method: 'POST',
             body: formData
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            updateProcessingStatus('processing', 40);
-            return response.json();
-        })
-        .then(data => {
-            if (data.error) {
-                throw new Error(data.error);
-            }
-
-            // Show success in processing status
-            updateProcessingStatus('complete', 100);
-
-            // Add to audit trail with smooth scroll
-            const timestamp = new Date().toLocaleTimeString();
-            auditTrail.innerHTML += `
-                <div class="audit-entry mb-2">
-                    <small class="text-muted">${timestamp}</small>
-                    <div>Uploaded: ${file.name}</div>
-                    <div>Status: Success</div>
-                </div>
-            `;
-            scrollToBottom(auditTrail);
-        })
-        .catch(error => {
-            // Show error in processing status
-            updateProcessingStatus('error', 100);
-
-            auditTrail.innerHTML += `
-                <div class="audit-entry error mb-2">
-                    <small class="text-muted">${new Date().toLocaleTimeString()}</small>
-                    <div>Upload failed: ${file.name}</div>
-                    <div>Error: ${error.message}</div>
-                </div>
-            `;
-            scrollToBottom(auditTrail);
-        })
-        .finally(() => {
-            // Hide spinner
-            uploadSpinner.classList.add('d-none');
         });
     });
 });
