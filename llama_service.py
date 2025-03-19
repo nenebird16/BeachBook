@@ -28,38 +28,28 @@ class LlamaService:
                     self.logger.info("Attempting to query graph database")
                     query_analysis['database_state'] = 'connected'
 
-                    # First check if database has any nodes
-                    node_count = self.graph_db.count_nodes()
-                    query_analysis['total_nodes'] = node_count
-
-                    if node_count == 0:
-                        self.logger.warning("Database is empty, no nodes to query")
-                        query_analysis['status'] = 'empty_database'
+                    results = self._execute_knowledge_graph_queries(query_text)
+                    if results:
+                        self.logger.info(f"Found {len(results)} results in knowledge graph")
+                        context = self._prepare_context(results)
+                        if context:
+                            chat_response = self.generate_response(query_text, context)
+                            query_analysis['found_matches'] = True
+                            query_analysis['match_count'] = len(results)
                     else:
-                        results = self._execute_knowledge_graph_queries(query_text)
-                        query_analysis['status'] = 'executed_query'
+                        self.logger.info("No results found in knowledge graph")
+                        query_analysis['found_matches'] = False
 
-                        if results:
-                            self.logger.info(f"Found {len(results)} results in knowledge graph")
-                            context = self._prepare_context(results)
-                            if context:
-                                chat_response = self.generate_response(query_text, context)
-                                query_analysis['found_matches'] = True
-                                query_analysis['match_count'] = len(results)
-                        else:
-                            self.logger.info("No results found in knowledge graph")
-                            query_analysis['found_matches'] = False
-
-                        return {
-                            'response': chat_response,
-                            'technical_details': {
-                                'queries': {
-                                    'query_analysis': query_analysis,
-                                    'content_query': "MATCH (n) WHERE n.content CONTAINS $query RETURN n.content as content LIMIT 5"
-                                },
-                                'results': results if results else 'No matches found in knowledge graph'
-                            }
+                    return {
+                        'response': chat_response,
+                        'technical_details': {
+                            'queries': {
+                                'query_analysis': query_analysis,
+                                'content_query': "MATCH (n) WHERE n.content CONTAINS $query RETURN n.content as content LIMIT 5"
+                            },
+                            'results': results if results else 'No matches found in knowledge graph'
                         }
+                    }
 
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
@@ -90,7 +80,6 @@ class LlamaService:
             return []
 
         try:
-            # Use the abstracted graph database interface
             query = """
             MATCH (n)
             WHERE n.content CONTAINS $query
