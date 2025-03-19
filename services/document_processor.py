@@ -36,17 +36,9 @@ class DocumentProcessor:
                 'timestamp': datetime.now().isoformat()
             }
 
-            # Extract content from file
+            # Extract file content
             file_content = self._extract_file_content(file)
             doc_info['content'] = file_content
-
-            # Extract metadata
-            doc_info['metadata'] = self._extract_metadata(file_content)
-
-            # Process with LlamaIndex
-            self.logger.info("Processing document with LlamaIndex...")
-            self.llama_service.process_document(file_content)
-            self.logger.info("Document processed successfully with LlamaIndex")
 
             # Create document node in Neo4j
             self.logger.info("Creating document node in Neo4j...")
@@ -59,6 +51,11 @@ class DocumentProcessor:
             self._create_entity_nodes(doc_node, entities)
             self.logger.info(f"Created {len(entities)} entity relationships")
 
+            # Process with LlamaIndex after entity extraction
+            self.logger.info("Processing document with LlamaIndex...")
+            self.llama_service.process_document(file_content)
+            self.logger.info("Document processed successfully with LlamaIndex")
+
             return doc_info
 
         except Exception as e:
@@ -70,9 +67,7 @@ class DocumentProcessor:
         try:
             if file.filename.endswith('.txt'):
                 content = file.read()
-                text_content = content.decode('utf-8') if isinstance(content, bytes) else str(content)
-                self.logger.debug(f"Extracted text content: {text_content[:100]}...")  # Log first 100 chars
-                return text_content
+                return content.decode('utf-8') if isinstance(content, bytes) else str(content)
             elif file.filename.endswith('.csv'):
                 import pandas as pd
                 df = pd.read_csv(file)
@@ -90,44 +85,6 @@ class DocumentProcessor:
         except Exception as e:
             self.logger.error(f"Error extracting file content: {str(e)}")
             raise
-
-    def _extract_metadata(self, content: str) -> Dict:
-        """Extract metadata from document content"""
-        try:
-            doc = self.nlp(content[:5000])  # Process first 5000 chars for efficiency
-            return {
-                'word_count': len(content.split()),
-                'char_count': len(content),
-                'sentence_count': len(list(doc.sents)),
-                'created_at': datetime.now().isoformat(),
-                'language': doc.lang_
-            }
-        except Exception as e:
-            self.logger.error(f"Error extracting metadata: {str(e)}")
-            return {}
-
-    def _create_entity_nodes(self, doc_node, entities: List[Dict]) -> None:
-        """Create entity nodes and link them to the document"""
-        for entity in entities:
-            try:
-                # Validate entity against schema
-                entity_type = entity.get('type')
-                if entity_type in self.entity_schemas:
-                    schema = self.entity_schemas[entity_type]
-
-                    # Check required fields
-                    if all(field in entity for field in schema['required']):
-                        # Create the entity and relationship to document
-                        self.graph_service.create_entity_node(entity, doc_node)
-                    else:
-                        self.logger.warning(f"Entity {entity['name']} missing required fields")
-                else:
-                    # If no schema exists, create anyway but log warning
-                    self.logger.warning(f"No schema for entity type: {entity_type}")
-                    self.graph_service.create_entity_node(entity, doc_node)
-            except Exception as e:
-                self.logger.error(f"Error creating entity node: {str(e)}")
-                continue
 
     def _extract_entities(self, content: str) -> List[Dict]:
         """Extract domain-specific entities from content"""
@@ -176,74 +133,66 @@ class DocumentProcessor:
                             'source': 'domain_terminology'
                         })
 
-            # Add relationships between players mentioned together
-            player_entities = [e for e in entities if e['type'] == 'Player']
-            for i, player1 in enumerate(player_entities):
-                for player2 in player_entities[i+1:]:
-                    if abs(content.find(player1['name']) - content.find(player2['name'])) < 100:
-                        # Players mentioned close together likely have a relationship
-                        entities.append({
-                            'name': f"{player1['name']} and {player2['name']}",
-                            'type': 'Partnership',
-                            'source': 'relationship_inference'
-                        })
-
             return entities
 
         except Exception as e:
             self.logger.error(f"Error extracting entities: {str(e)}")
             return []
 
+    def _create_entity_nodes(self, doc_node, entities: List[Dict]) -> None:
+        """Create entity nodes and link them to the document"""
+        for entity in entities:
+            try:
+                # Validate entity against schema
+                entity_type = entity.get('type')
+                if entity_type in self.entity_schemas:
+                    schema = self.entity_schemas[entity_type]
+
+                    # Check required fields
+                    if all(field in entity for field in schema['required']):
+                        # Create the entity and relationship to document
+                        self.graph_service.create_entity_node(entity, doc_node)
+                    else:
+                        self.logger.warning(f"Entity {entity['name']} missing required fields")
+                else:
+                    # If no schema exists, create anyway but log warning
+                    self.logger.warning(f"No schema for entity type: {entity_type}")
+                    self.graph_service.create_entity_node(entity, doc_node)
+            except Exception as e:
+                self.logger.error(f"Error creating entity node: {str(e)}")
+                continue
+
     def _load_entity_schemas(self) -> Dict[str, Dict]:
         """Load entity schemas from configuration"""
         return {
             "Player": {
                 "required": ["name"],
-                "optional": ["nationality", "achievements", "specialization", 
-                           "playing_style", "team_partner", "visual_strengths"],
+                "optional": ["nationality", "achievements", "specialization"],
                 "types": {
                     "name": str,
                     "nationality": str,
                     "achievements": str,
-                    "specialization": str,
-                    "playing_style": str,
-                    "team_partner": str,
-                    "visual_strengths": str
+                    "specialization": str
                 }
             },
             "Skill": {
                 "required": ["name"],
-                "optional": ["description", "category", "difficulty", "visualRequirements"],
+                "optional": ["description", "category", "difficulty"],
                 "types": {
                     "name": str,
                     "description": str,
                     "category": str,
-                    "difficulty": str,
-                    "visualRequirements": str
+                    "difficulty": str
                 }
             },
             "Drill": {
                 "required": ["name"],
-                "optional": ["description", "focus_area", "intensity", "duration", 
-                           "equipment_needed", "visual_elements", "targets"],
+                "optional": ["description", "focus_area", "intensity"],
                 "types": {
                     "name": str,
                     "description": str,
                     "focus_area": str,
-                    "intensity": str,
-                    "duration": int,
-                    "equipment_needed": str,
-                    "visual_elements": str,
-                    "targets": str
-                }
-            },
-            "VisualElement": {
-                "required": ["name"],
-                "optional": ["description", "category"],
-                "types": {
-                    "name": str,
-                    "description": str,
-                    "category": str
+                    "intensity": str
                 }
             }
         }
@@ -256,10 +205,8 @@ class DocumentProcessor:
                 "target": ["Skill"],
                 "properties": {
                     "required": [],
-                    "optional": ["primary", "development_phase", "effectiveness_rating"],
+                    "optional": ["effectiveness_rating"],
                     "types": {
-                        "primary": bool,
-                        "development_phase": str,
                         "effectiveness_rating": int
                     }
                 }
@@ -269,10 +216,9 @@ class DocumentProcessor:
                 "target": ["Skill"],
                 "properties": {
                     "required": [],
-                    "optional": ["strength", "transfer_effect"],
+                    "optional": ["strength"],
                     "types": {
-                        "strength": int,
-                        "transfer_effect": str
+                        "strength": int
                     }
                 }
             }
