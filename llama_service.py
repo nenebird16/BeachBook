@@ -21,7 +21,19 @@ class LlamaService:
             # Get current timestamp for all events
             current_time = datetime.now().isoformat()
 
-            # Define the base queries that will be shown regardless of DB state
+            # Extract entities from query
+            query_entities = self.semantic_processor.extract_entities_from_query(query_text)
+            self.logger.info(f"Extracted entities from query: {query_entities}")
+
+            # Build search patterns
+            search_terms = [entity['text'] for entity in query_entities]
+            if not search_terms:  # If no entities found, use the whole query
+                search_terms = [query_text]
+
+            # Create case-insensitive pattern for each term
+            search_patterns = [f"(?i).*{term}.*" for term in search_terms]
+
+            # Define the base queries that will always be included in response
             content_query = """
             MATCH (n:Player)
             WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
@@ -43,21 +55,6 @@ class LlamaService:
             LIMIT 3
             """
 
-            # Extract entities from query
-            query_entities = self.semantic_processor.extract_entities_from_query(query_text)
-            self.logger.info(f"Extracted entities from query: {query_entities}")
-
-            # Build search patterns
-            search_terms = [entity['text'] for entity in query_entities]
-            if not search_terms:  # If no entities found, use the whole query
-                search_terms = [query_text]
-
-            # Create case-insensitive pattern for each term
-            search_patterns = [f"(?i).*{term}.*" for term in search_terms]
-
-            # Generate base chat response
-            chat_response = self.generate_response(query_text)
-
             # Initialize query analysis
             query_analysis = {
                 'input_query': query_text,
@@ -71,15 +68,13 @@ class LlamaService:
                 'entities_found': query_entities
             }
 
-            # Try to query graph database if available
-            results = []
-            related_results = []
+            # Generate base chat response
+            chat_response = self.generate_response(query_text)
 
+            # Try to query graph database if available
             if self.graph_db:
                 try:
                     self.logger.info("Attempting to query graph database")
-
-                    # Execute primary content search
                     results = self.graph_db.query(content_query, {'search_patterns': search_patterns})
 
                     if results:
@@ -92,7 +87,6 @@ class LlamaService:
                         if context:
                             chat_response = self.generate_response(query_text, context)
 
-                        # Update analysis
                         query_analysis.update({
                             'found_matches': True,
                             'direct_matches': len(results),
@@ -106,7 +100,7 @@ class LlamaService:
                     query_analysis['error'] = str(e)
                     query_analysis['database_state'] = 'error'
 
-            # Always return the queries and analysis in the response
+            # Always return both the chat response and technical details including queries
             return {
                 'response': chat_response,
                 'technical_details': {
