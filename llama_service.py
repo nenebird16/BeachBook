@@ -16,10 +16,11 @@ class LlamaService:
             self.logger.warning("No graph database provided, running in chat-only mode")
 
     def process_query(self, query_text: str) -> Dict:
-        """Process a query using Claude and optionally Neo4j"""
+        """Process a query using hybrid search (text + vectors)"""
         try:
-            # Extract entities from query
+            # Extract entities and generate embedding for the query
             query_entities = self.semantic_processor.extract_entities_from_query(query_text)
+            query_embedding = self.semantic_processor.generate_embedding(query_text)
             self.logger.info(f"Extracted entities from query: {query_entities}")
 
             # Build search patterns
@@ -30,20 +31,38 @@ class LlamaService:
             # Create case-insensitive pattern for each term
             search_patterns = [f"(?i).*{term}.*" for term in search_terms]
 
-            # Debug log the search patterns
-            self.logger.debug(f"Generated search patterns: {search_patterns}")
+            # Vector similarity search query
+            vector_query = """
+            CALL db.index.vector.queryNodes(
+                'document_embeddings',
+                5,
+                $embedding
+            ) YIELD node, score
+            WITH node, score
+            MATCH (node)-[:CONTAINS]->(e:Entity)
+            RETURN node.title as title,
+                   node.content as content,
+                   collect(distinct e.name) as entities,
+                   score as similarity
+            ORDER BY similarity DESC
+            """
 
-            # Define queries
+            # Text-based search query
             content_query = """
             MATCH (n)
-            WHERE any(pattern IN $search_patterns WHERE 
-                  (n:Player AND (n.name =~ pattern OR n.description =~ pattern))
-                  OR (n:Skill AND n.name =~ pattern)
-                  OR (n:Technique AND n.name =~ pattern)
-            )
+            WHERE (n:Document AND any(pattern IN $search_patterns 
+                  WHERE n.title =~ pattern OR n.content =~ pattern))
+               OR (n:Player AND any(pattern IN $search_patterns 
+                  WHERE n.name =~ pattern OR n.description =~ pattern))
+               OR (n:Skill AND any(pattern IN $search_patterns 
+                  WHERE n.name =~ pattern))
+               OR (n:Technique AND any(pattern IN $search_patterns 
+                  WHERE n.name =~ pattern))
             WITH n
             OPTIONAL MATCH (n)-[r]->(related)
-            RETURN n.name as name, 
+            RETURN n.title as title,
+                   n.content as content,
+                   n.name as name,
                    n.description as description,
                    labels(n) as types,
                    collect(distinct type(r)) as relationships,
@@ -51,41 +70,30 @@ class LlamaService:
             LIMIT 5
             """
 
-            entity_query = """
-            MATCH (n)-[r]-(m)
-            WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
-            RETURN DISTINCT type(r) as relationship,
-                   m.name as related_entity,
-                   labels(m) as related_types
-            LIMIT 3
-            """
-
             # Initialize response structure
             response = {
                 'response': None,  # Will be set later
                 'technical_details': {
                     'queries': {
+                        'vector_query': vector_query,
                         'content_query': content_query,
-                        'entity_query': entity_query,
                         'parameters': {
-                            'search_patterns': search_patterns
+                            'search_patterns': search_patterns,
+                            'embedding_dimensions': len(query_embedding) if query_embedding else None
                         },
                         'query_analysis': {
                             'input_query': query_text,
-                            'query_type': 'volleyball_knowledge_search',
+                            'query_type': 'hybrid_search',
                             'database_state': 'connected' if self.graph_db else 'disconnected',
                             'analysis_timestamp': datetime.now().isoformat(),
                             'found_matches': False,
                             'direct_matches': 0,
-                            'related_matches': 0,
+                            'vector_matches': 0,
                             'entities_found': query_entities
                         }
                     }
                 }
             }
-
-            # Debug log the initial response structure
-            self.logger.debug("Initial response structure prepared")
 
             # Generate base chat response
             response['response'] = self.generate_response(query_text)
@@ -93,28 +101,52 @@ class LlamaService:
             # Try to query graph database if available
             if self.graph_db:
                 try:
-                    self.logger.info("Attempting to query graph database")
+                    self.logger.info("Executing hybrid search")
 
-                    # Execute content query
-                    results = self.graph_db.query(content_query, {'search_patterns': search_patterns})
-                    self.logger.debug(f"Content query results: {results}")
+                    # Execute vector search if embedding available
+                    vector_results = []
+                    if query_embedding:
+                        vector_results = self.graph_db.query(
+                            vector_query, 
+                            {'embedding': query_embedding}
+                        )
+                        self.logger.debug(f"Vector search results: {vector_results}")
 
-                    if results:
-                        # If we found direct matches, look for related content
-                        self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
-                        related_results = self.graph_db.query(entity_query, {'search_patterns': search_patterns})
-                        self.logger.debug(f"Related query results: {related_results}")
+                    # Execute text-based search
+                    content_results = self.graph_db.query(
+                        content_query, 
+                        {'search_patterns': search_patterns}
+                    )
+                    self.logger.debug(f"Text search results: {content_results}")
 
-                        # Prepare context from results
-                        context = self._prepare_context(results + related_results)
+                    # Combine results
+                    all_results = []
+                    seen_titles = set()
+
+                    # Add vector results first
+                    for result in vector_results:
+                        if result.get('title') not in seen_titles:
+                            seen_titles.add(result.get('title'))
+                            all_results.append(result)
+
+                    # Add text search results
+                    for result in content_results:
+                        title = result.get('title') or result.get('name')
+                        if title and title not in seen_titles:
+                            seen_titles.add(title)
+                            all_results.append(result)
+
+                    if all_results:
+                        # Prepare context from combined results
+                        context = self._prepare_context(all_results)
                         if context:
                             response['response'] = self.generate_response(query_text, context)
 
                         # Update analysis
                         response['technical_details']['queries']['query_analysis'].update({
                             'found_matches': True,
-                            'direct_matches': len(results),
-                            'related_matches': len(related_results) if related_results else 0
+                            'direct_matches': len(content_results),
+                            'vector_matches': len(vector_results)
                         })
 
                 except Exception as e:
@@ -122,12 +154,11 @@ class LlamaService:
                     response['technical_details']['queries']['query_analysis']['database_state'] = 'error'
                     response['technical_details']['queries']['query_analysis']['error'] = str(e)
 
-            # Debug log the final response structure
-            self.logger.debug(f"Final response structure: {response}")
             return response
 
         except Exception as e:
             self.logger.error(f"Error in process_query: {str(e)}")
+            self.logger.error(f"Query text was: {query_text}")
             return {
                 'response': "I apologize, but I encountered an error processing your request. Please try again.",
                 'error': str(e)
@@ -140,42 +171,55 @@ class LlamaService:
 
         context_sections = []
         for result in results:
-            if 'name' in result:
-                section = f"Name: {result['name']}"
+            section = []
+
+            # Handle document results
+            if 'title' in result:
+                section.append(f"Document: {result['title']}")
+                if 'content' in result and result['content']:
+                    content_preview = result['content'][:500] + "..." if len(result['content']) > 500 else result['content']
+                    section.append(f"Content: {content_preview}")
+                if 'similarity' in result:
+                    section.append(f"Relevance Score: {result['similarity']:.2f}")
+                if 'entities' in result:
+                    section.append(f"Related concepts: {', '.join(result['entities'])}")
+
+            # Handle player/skill/technique results
+            elif 'name' in result:
+                section.append(f"Name: {result['name']}")
                 if 'description' in result and result['description']:
-                    section += f"\nDescription: {result['description']}"
+                    section.append(f"Description: {result['description']}")
                 if 'types' in result:
-                    section += f"\nType: {', '.join(result['types'])}"
+                    section.append(f"Type: {', '.join(result['types'])}")
                 if 'relationships' in result and result['relationships']:
-                    section += f"\nRelationships: {', '.join(result['relationships'])}"
+                    section.append(f"Relationships: {', '.join(result['relationships'])}")
                 if 'related_nodes' in result and result['related_nodes']:
                     related = [f"{r['target']} ({r['type']})" for r in result['related_nodes'] if r['target']]
                     if related:
-                        section += f"\nRelated: {', '.join(related)}"
-                context_sections.append(section)
-            elif 'relationship' in result and 'related_entity' in result:
-                section = f"Related: {result['related_entity']}"
-                if 'related_types' in result:
-                    section += f" (Type: {', '.join(result['related_types'])})"
-                context_sections.append(section)
+                        section.append(f"Related: {', '.join(related)}")
 
-        return "\n\n".join(context_sections) if context_sections else None
+            if section:
+                context_sections.append("\n".join(section))
+
+        return "\n\n".join(context_sections)
 
     def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
         """Generate a natural language response using Claude"""
         try:
             if context_info:
-                prompt = f"""Based on the following context about beach volleyball, answer this query: "{query}"
+                prompt = f"""Based on the following context about volleyball, help me answer this query: "{query}"
 
                 Context information:
                 {context_info}
 
-                Please provide a natural, conversational response about beach volleyball players, skills, techniques, or training methods.
+                Please provide a natural, conversational response about volleyball players, skills, techniques, or training methods.
+                Focus on the specific information found in the context.
                 """
             else:
                 prompt = f"""As a volleyball knowledge assistant, help me with this query: "{query}"
 
                 Please provide a helpful response about volleyball players, skills, techniques, or training methods.
+                If no specific information is found, suggest exploring related topics.
                 """
 
             response = self.anthropic.messages.create(
