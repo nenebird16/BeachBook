@@ -48,9 +48,25 @@ def upload_document():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
 
-        # Process the document
-        doc_info = doc_processor.process_document(file)
-        return jsonify({'message': 'Document processed successfully', 'doc_info': doc_info})
+        logger.info(f"Starting document processing for {file.filename}")
+
+        # Process the document with stages
+        try:
+            # Initial processing
+            doc_info = doc_processor.process_document(file)
+
+            # Return success response
+            return jsonify({
+                'message': 'Document processed successfully',
+                'doc_info': {
+                    'title': doc_info.get('title'),
+                    'timestamp': doc_info.get('timestamp')
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error during document processing: {str(e)}")
+            return jsonify({'error': str(e)}), 500
 
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")

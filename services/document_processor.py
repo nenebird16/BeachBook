@@ -33,17 +33,27 @@ class DocumentProcessor:
             # Create document info
             doc_info = {
                 'title': file.filename,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'stage': 'extracting',
+                'progress': 20
             }
 
             # Extract file content
             file_content = self._extract_file_content(file)
             doc_info['content'] = file_content
 
+            # Update progress
+            doc_info['stage'] = 'processing'
+            doc_info['progress'] = 40
+
             # Create document node in Neo4j
             self.logger.info("Creating document node in Neo4j...")
             doc_node = self.graph_service.create_document_node(doc_info)
             self.logger.info("Document node created successfully in Neo4j")
+
+            # Update progress
+            doc_info['stage'] = 'analyzing'
+            doc_info['progress'] = 60
 
             # Extract and create entity relationships
             self.logger.info("Creating entity relationships...")
@@ -51,15 +61,25 @@ class DocumentProcessor:
             self._create_entity_nodes(doc_node, entities)
             self.logger.info(f"Created {len(entities)} entity relationships")
 
+            # Update progress
+            doc_info['stage'] = 'storing'
+            doc_info['progress'] = 80
+
             # Process with LlamaIndex after entity extraction
             self.logger.info("Processing document with LlamaIndex...")
             self.llama_service.process_document(file_content)
             self.logger.info("Document processed successfully with LlamaIndex")
 
+            # Final progress update
+            doc_info['stage'] = 'complete'
+            doc_info['progress'] = 100
+
             return doc_info
 
         except Exception as e:
             self.logger.error(f"Error processing document: {str(e)}")
+            doc_info['stage'] = 'error'
+            doc_info['error'] = str(e)
             raise
 
     def _extract_file_content(self, file) -> str:
