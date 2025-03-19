@@ -16,43 +16,59 @@ app.secret_key = os.environ.get("SESSION_SECRET")
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
+def verify_env_variables():
+    """Verify all required environment variables are set"""
+    required_vars = {
+        'NEO4J_URI': os.environ.get('NEO4J_URI'),
+        'NEO4J_USER': os.environ.get('NEO4J_USER'),
+        'NEO4J_PASSWORD': os.environ.get('NEO4J_PASSWORD')
+    }
+
+    missing = [k for k, v in required_vars.items() if not v]
+    if missing:
+        logger.error(f"Missing required environment variables: {', '.join(missing)}")
+        return False
+
+    logger.info("All required environment variables are present")
+    return True
+
 def init_storage_services():
     """Initialize storage services with proper error handling"""
     services = {'graph_db': None, 'object_storage': None}
+
+    if not verify_env_variables():
+        logger.error("Cannot initialize storage services due to missing environment variables")
+        return services
+
     try:
-        logger.info("Initializing storage services...")
-
-        # Log environment variable presence (not values)
-        logger.debug("Checking environment variables...")
-        logger.debug(f"NEO4J_URI present: {bool(os.environ.get('NEO4J_URI'))}")
-        logger.debug(f"NEO4J_USER present: {bool(os.environ.get('NEO4J_USER'))}")
-        logger.debug(f"NEO4J_PASSWORD present: {bool(os.environ.get('NEO4J_PASSWORD'))}")
-
         # Initialize graph database
         try:
             logger.info("Initializing graph database...")
             graph_db = StorageFactory.create_graph_database("neo4j")
-            graph_db.connect()
-            logger.info("Graph database initialized successfully")
-            services['graph_db'] = graph_db
+            if graph_db:
+                logger.info("Graph database initialized successfully")
+                services['graph_db'] = graph_db
+            else:
+                logger.error("Failed to initialize graph database")
         except Exception as e:
-            logger.error(f"Failed to initialize graph database: {str(e)}")
+            logger.error(f"Error initializing graph database: {str(e)}")
 
         # Initialize object storage
         try:
             logger.info("Initializing object storage...")
             object_storage = StorageFactory.create_object_storage("replit")
-            object_storage.connect()
-            logger.info("Object storage initialized successfully")
-            services['object_storage'] = object_storage
+            if object_storage:
+                logger.info("Object storage initialized successfully")
+                services['object_storage'] = object_storage
+            else:
+                logger.error("Failed to initialize object storage")
         except Exception as e:
-            logger.error(f"Failed to initialize object storage: {str(e)}")
-
-        return services
+            logger.error(f"Error initializing object storage: {str(e)}")
 
     except Exception as e:
         logger.error(f"Failed to initialize storage services: {str(e)}")
-        return services
+
+    return services
 
 # Initialize storage services
 services = init_storage_services()
@@ -61,25 +77,22 @@ services = init_storage_services()
 app.config['graph_db'] = services.get('graph_db')
 app.config['object_storage'] = services.get('object_storage')
 
-if not any(services.values()):
-    logger.warning("No storage services were initialized successfully")
-else:
-    logger.info("Some storage services initialized successfully")
-
 # Health check endpoint
 @app.route('/health')
 def health_check():
-    """Basic health check endpoint"""
+    """Comprehensive health check endpoint"""
     try:
         # Check each storage service
         storage_status = {
             'graph_db': {
                 'available': bool(app.config.get('graph_db')),
-                'connected': False
+                'connected': False,
+                'error': None
             },
             'object_storage': {
                 'available': bool(app.config.get('object_storage')),
-                'connected': False
+                'connected': False,
+                'error': None
             }
         }
 
@@ -89,7 +102,9 @@ def health_check():
                 app.config['graph_db'].query("RETURN 1 as test")
                 storage_status['graph_db']['connected'] = True
             except Exception as e:
-                logger.error(f"Graph database connection test failed: {str(e)}")
+                error_msg = str(e)
+                logger.error(f"Graph database connection test failed: {error_msg}")
+                storage_status['graph_db']['error'] = error_msg
 
         # Test object storage connection if available
         if storage_status['object_storage']['available']:
@@ -97,13 +112,23 @@ def health_check():
                 app.config['object_storage'].list_files()
                 storage_status['object_storage']['connected'] = True
             except Exception as e:
-                logger.error(f"Object storage connection test failed: {str(e)}")
+                error_msg = str(e)
+                logger.error(f"Object storage connection test failed: {error_msg}")
+                storage_status['object_storage']['error'] = error_msg
+
+        # Check environment variables
+        env_vars = {
+            'NEO4J_URI': bool(os.environ.get('NEO4J_URI')),
+            'NEO4J_USER': bool(os.environ.get('NEO4J_USER')),
+            'NEO4J_PASSWORD': bool(os.environ.get('NEO4J_PASSWORD'))
+        }
 
         # Determine overall health status
         is_healthy = any(status['connected'] for status in storage_status.values())
 
         return jsonify({
             'status': 'healthy' if is_healthy else 'degraded',
+            'environment': env_vars,
             'storage': storage_status
         }), 200 if is_healthy else 503
 
