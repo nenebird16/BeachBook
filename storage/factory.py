@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import Optional
-from py2neo import Graph, ConnectionProfile
+from py2neo import Graph
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -10,7 +10,7 @@ class StorageFactory:
     """Factory class for creating storage implementations"""
 
     @staticmethod
-    def create_graph_database(db_type: str = "neo4j") -> Optional['GraphDatabaseInterface']:
+    def create_graph_database(db_type: str = "neo4j") -> Optional[Graph]:
         """Create and return a graph database implementation"""
         logger.info(f"Creating graph database implementation: {db_type}")
 
@@ -30,33 +30,17 @@ class StorageFactory:
                 return None
 
             try:
-                # Parse URI and map to py2neo compatible scheme
+                # Parse URI to get hostname
                 parsed_uri = urlparse(uri)
-                scheme_mapping = {
-                    'neo4j': 'bolt',
-                    'neo4j+s': 'bolt+s',
-                    'bolt': 'bolt',
-                    'bolt+s': 'bolt+s'
-                }
+                host = parsed_uri.hostname
+                port = 7687  # Default Neo4j bolt port
 
-                original_scheme = parsed_uri.scheme
-                scheme = scheme_mapping.get(original_scheme, 'bolt')
-
-                logger.info(f"Creating Neo4j connection with scheme: {scheme} (mapped from {original_scheme})")
-                logger.debug(f"Host: {parsed_uri.hostname}, Port: {parsed_uri.port or 7687}")
-
-                # Create connection profile
-                profile = ConnectionProfile(
-                    scheme=scheme,
-                    host=parsed_uri.hostname,
-                    port=parsed_uri.port or 7687,
-                    secure=scheme.endswith('+s'),
-                    user=username,
-                    password=password
-                )
+                # Create direct bolt connection string
+                bolt_uri = f"bolt+s://{host}:{port}"
+                logger.info(f"Connecting to Neo4j at: {bolt_uri}")
 
                 # Initialize database connection
-                graph = Graph(profile=profile)
+                graph = Graph(bolt_uri, auth=(username, password))
 
                 # Test connection
                 result = graph.run("MATCH (n) RETURN count(n) as count LIMIT 1").data()
@@ -79,9 +63,8 @@ class StorageFactory:
 
         if storage_type == "replit":
             try:
-                storage = ReplitObjectStorage(bucket_name or "default")
-                storage.connect()
-                return storage
+                from replit import db
+                return db
             except Exception as e:
                 logger.error(f"Failed to create Replit storage: {str(e)}")
                 return None
