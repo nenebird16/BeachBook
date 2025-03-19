@@ -114,6 +114,7 @@ document.addEventListener('DOMContentLoaded', function() {
         progressText.textContent = stages[stage] || stage;
 
         if (stage === 'complete') {
+            progressBar.classList.remove('bg-danger');
             setTimeout(() => {
                 processingStatus.classList.add('d-none');
                 progressBar.style.width = '0%';
@@ -148,6 +149,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (data.error) {
+                throw new Error(data.error);
             }
 
             // Now start listening for progress events

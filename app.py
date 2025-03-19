@@ -1,7 +1,7 @@
 import os
 import logging
 import config  # Import config first to load environment variables
-from flask import Flask, request, render_template, jsonify, Response, stream_with_context, session
+from flask import Flask, request, render_template, jsonify, Response, stream_with_context
 from werkzeug.utils import secure_filename
 
 # Configure logging
@@ -49,7 +49,7 @@ def process_document_with_progress(file_path):
         # Open and process the file
         with open(file_path, 'r') as file:
             content = file.read()
-            # Create a file-like object
+
             class FileWrapper:
                 def __init__(self, content, filename):
                     self.content = content
@@ -76,8 +76,11 @@ def process_document_with_progress(file_path):
             for stage, progress in stages:
                 yield f"data: {{\"stage\": \"{stage}\", \"progress\": {progress}}}\n\n"
 
-            # Send completion event
-            yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
+            # Always send a completion event, even if doc_info indicates an error
+            if doc_info.get('error'):
+                yield f"data: {{\"stage\": \"error\", \"error\": \"{doc_info['error']}\"}}\n\n"
+            else:
+                yield "data: {\"stage\": \"complete\", \"progress\": 100}\n\n"
 
     except Exception as e:
         logger.error(f"Error during document processing: {str(e)}")
