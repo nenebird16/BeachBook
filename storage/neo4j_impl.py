@@ -27,29 +27,37 @@ class Neo4jDatabase(GraphDatabaseInterface):
                 self.logger.error("Missing Neo4j credentials")
                 return False
 
-            # Parse URI components for debugging
+            # Parse URI and log components
             parsed_uri = urlparse(uri)
             self.logger.debug("Connecting to Neo4j database:")
-            self.logger.debug(f"Original URI: {uri}")
-            self.logger.debug(f"Scheme: {parsed_uri.scheme}")
+            self.logger.debug(f"Original URI scheme: {parsed_uri.scheme}")
             self.logger.debug(f"Host: {parsed_uri.hostname}")
             self.logger.debug(f"Port: {parsed_uri.port or 7687}")
 
-            # Convert neo4j+s protocol to bolt+s for AuraDB
+            # Handle protocol conversion for AuraDB
             if parsed_uri.scheme == 'neo4j+s':
+                # Convert neo4j+s:// to bolt+s:// for AuraDB
                 connection_uri = f"bolt+s://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
+                self.logger.info("Using AuraDB secure connection")
+                ssl_enabled = True
             elif parsed_uri.scheme == 'neo4j':
+                # Convert neo4j:// to bolt:// for non-secure connections
                 connection_uri = f"bolt://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
+                self.logger.info("Using non-secure connection")
+                ssl_enabled = False
             else:
+                # Use original URI for other protocols (bolt://, bolt+s://)
                 connection_uri = uri
+                ssl_enabled = '+s' in parsed_uri.scheme
 
-            self.logger.info(f"Using connection URI: {connection_uri}")
+            self.logger.info(f"Connecting using URI: {connection_uri}")
 
-            # Initialize the Graph with appropriate settings
+            # Initialize Graph connection with appropriate SSL settings
             self.graph = Graph(
                 connection_uri,
                 auth=(username, password),
-                name="neo4j"  # Default database name for AuraDB
+                name="neo4j",  # Default database name for AuraDB
+                secure=ssl_enabled
             )
 
             # Test connection
@@ -66,6 +74,7 @@ class Neo4jDatabase(GraphDatabaseInterface):
         except Exception as e:
             self.logger.error(f"Failed to connect to Neo4j: {str(e)}")
             self.logger.error(f"Error type: {type(e)}")
+            self.logger.error(f"Connection URI attempted: {connection_uri}")
             return False
 
     def query(self, query_string: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
