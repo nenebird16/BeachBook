@@ -19,11 +19,26 @@ class LlamaService:
 
             if all([uri, username, password]):
                 parsed_uri = urlparse(uri)
+
+                # Map Neo4j URI schemes to compatible py2neo schemes
+                scheme_mapping = {
+                    'neo4j': 'bolt',
+                    'neo4j+s': 'bolt+s',
+                    'bolt': 'bolt',
+                    'bolt+s': 'bolt+s'
+                }
+
+                # Get the correct scheme or default to bolt
+                original_scheme = parsed_uri.scheme
+                scheme = scheme_mapping.get(original_scheme, 'bolt')
+
+                self.logger.info(f"Connecting to Neo4j with scheme: {scheme} (mapped from {original_scheme})")
+
                 profile = ConnectionProfile(
-                    scheme="bolt+s" if parsed_uri.scheme == 'neo4j+s' else parsed_uri.scheme,
-                    host=parsed_uri.netloc,
-                    port=7687,
-                    secure=True if parsed_uri.scheme == 'neo4j+s' else False,
+                    scheme=scheme,
+                    host=parsed_uri.hostname,
+                    port=parsed_uri.port or 7687,
+                    secure=scheme.endswith('+s'),
                     user=username,
                     password=password
                 )
@@ -49,13 +64,13 @@ class LlamaService:
                         if context:
                             chat_response = self.generate_response(query_text, context)
 
-                        return {
-                            'response': chat_response,
-                            'technical_details': {
-                                'queries': {'query': query_text},
-                                'results': results
-                            }
+                    return {
+                        'response': chat_response,
+                        'technical_details': {
+                            'queries': {'query': query_text},
+                            'results': results
                         }
+                    }
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
 
