@@ -60,7 +60,55 @@ document.addEventListener('DOMContentLoaded', function() {
         container.scrollTop = container.scrollHeight;
     }
 
-    // Handle Enter key in textarea (Shift+Enter for new line)
+    function displayQueries(data) {
+        let queryContent = '';
+        const queries = data.technical_details?.queries;
+
+        if (queries) {
+            // Display content query if available
+            if (queries.content_query) {
+                queryContent += `
+                    <div class="cypher-query mb-3">
+                        <h6>Content Search Query:</h6>
+                        <pre><code>${queries.content_query}</code></pre>
+                    </div>
+                `;
+            }
+
+            // Display entity query if available
+            if (queries.entity_query) {
+                queryContent += `
+                    <div class="cypher-query mb-3">
+                        <h6>Related Entities Query:</h6>
+                        <pre><code>${queries.entity_query}</code></pre>
+                    </div>
+                `;
+            }
+
+            // Display search patterns if available
+            if (queries.parameters?.search_patterns) {
+                queryContent += `
+                    <div class="cypher-query mb-3">
+                        <h6>Search Patterns:</h6>
+                        <pre><code>${JSON.stringify(queries.parameters.search_patterns, null, 2)}</code></pre>
+                    </div>
+                `;
+            }
+
+            // Display query analysis if available
+            if (queries.query_analysis) {
+                queryContent += `
+                    <div class="cypher-query">
+                        <h6>Query Analysis:</h6>
+                        <pre><code>${JSON.stringify(queries.query_analysis, null, 2)}</code></pre>
+                    </div>
+                `;
+            }
+        }
+
+        cypherQueries.innerHTML = queryContent || '<div class="alert alert-info">No queries generated.</div>';
+    }
+
     queryInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -68,7 +116,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Auto-expand textarea
     queryInput.addEventListener('input', function() {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
@@ -78,7 +125,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
 
-        // Add user message to chat
         chatHistory.innerHTML += `
             <div class="chat-message user-message mb-2">
                 <strong>You:</strong> ${queryText}
@@ -86,7 +132,6 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         scrollToBottom(chatHistory);
 
-        // Send query to server
         fetch('/query', {
             method: 'POST',
             headers: {
@@ -102,7 +147,6 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             if (data.error) throw new Error(data.error);
 
-            // Display chat response
             chatHistory.innerHTML += `
                 <div class="chat-message bot-message mb-2">
                     <strong>Bot:</strong> ${data.response}
@@ -110,40 +154,8 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
-            // Always try to display queries
-            let queryContent = '';
-            if (data.technical_details?.queries) {
-                const queries = data.technical_details.queries;
-
-                if (queries.content_query) {
-                    queryContent += `
-                        <div class="cypher-query mb-3">
-                            <h6>Player Search Query:</h6>
-                            <pre><code>${queries.content_query}</code></pre>
-                        </div>
-                    `;
-                }
-
-                if (queries.entity_query) {
-                    queryContent += `
-                        <div class="cypher-query mb-3">
-                            <h6>Related Entities Query:</h6>
-                            <pre><code>${queries.entity_query}</code></pre>
-                        </div>
-                    `;
-                }
-
-                if (queries.parameters?.search_patterns) {
-                    queryContent += `
-                        <div class="cypher-query">
-                            <h6>Search Patterns:</h6>
-                            <pre><code>${JSON.stringify(queries.parameters.search_patterns, null, 2)}</code></pre>
-                        </div>
-                    `;
-                }
-            }
-
-            cypherQueries.innerHTML = queryContent || '<div class="alert alert-info">No queries generated.</div>';
+            // Display queries
+            displayQueries(data);
 
             // Add to audit trail
             const timestamp = new Date().toLocaleTimeString();
@@ -157,12 +169,10 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(auditTrail);
 
-            // Clear input
             queryInput.value = '';
             queryInput.style.height = 'auto';
         })
         .catch(error => {
-            // Display error in chat
             chatHistory.innerHTML += `
                 <div class="chat-message error-message mb-2">
                     <strong>Error:</strong> ${error.message}
@@ -170,7 +180,6 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             scrollToBottom(chatHistory);
 
-            // Add error to audit trail
             const timestamp = new Date().toLocaleTimeString();
             auditTrail.innerHTML += `
                 <div class="audit-entry error mb-2">
@@ -186,57 +195,115 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <style>
+#graphVisualization {
+    width: 100%;
+    height: 500px;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.card {
+    background-color: var(--bs-dark);
+    border: 1px solid var(--bs-border-color);
+}
+
+.card-header {
+    background-color: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
 .chat-message {
     padding: 0.5rem;
-    border-radius: 0.25rem;
+    border-radius: 4px;
     margin-bottom: 0.5rem;
+    opacity: 0;
+    animation: fadeIn 0.3s ease-in forwards;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .user-message {
-    background-color: rgba(var(--bs-primary-rgb), 0.15);
-    color: var(--bs-emphasis-color);
+    background-color: rgba(var(--bs-primary-rgb), 0.1);
+    margin-left: 1rem;
 }
 
 .bot-message {
-    background-color: rgba(var(--bs-tertiary-rgb), 0.2);
-    color: var(--bs-emphasis-color);
+    background-color: rgba(var(--bs-secondary-rgb), 0.1);
+    margin-right: 1rem;
 }
 
 .error-message {
-    background-color: rgba(var(--bs-danger-rgb), 0.15);
-    color: var(--bs-danger);
+    background-color: rgba(var(--bs-danger-rgb), 0.1);
 }
 
-.audit-trail-container {
-    max-height: 400px;
-    overflow-y: auto;
+.chat-input-container {
+    position: relative;
+    padding: 1rem;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
 }
 
-.audit-entry {
-    padding: 0.5rem;
-    border-radius: 0.25rem;
-    background-color: rgba(var(--bs-tertiary-rgb), 0.2);
-    color: var(--bs-emphasis-color);
-}
-
-.audit-entry.error {
-    background-color: rgba(var(--bs-danger-rgb), 0.15);
-    color: var(--bs-danger);
+#queryText {
+    background-color: var(--bs-dark);
+    color: var(--bs-light);
+    border: 1px solid var(--bs-border-color);
+    min-height: 38px;
+    max-height: 150px;
+    padding: 8px 12px;
+    line-height: 1.5;
 }
 
 .cypher-query {
-    background-color: rgba(var(--bs-dark-rgb), 0.15);
+    background-color: rgba(0, 0, 0, 0.2);
     padding: 1rem;
-    border-radius: 0.25rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.cypher-query h6 {
+    color: var(--bs-light);
+    margin-bottom: 0.5rem;
 }
 
 .cypher-query pre {
     margin-bottom: 0;
-    color: var(--bs-emphasis-color);
+    background-color: rgba(0, 0, 0, 0.1);
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+.cypher-query code {
+    color: var(--bs-light);
+    white-space: pre-wrap;
+}
+
+.audit-trail-container {
+    height: 500px;
+    overflow-y: auto;
+    padding: 1rem;
+    background-color: rgba(0, 0, 0, 0.1);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 4px;
+    scroll-behavior: smooth;
+}
+
+.audit-entry {
+    padding: 0.5rem;
+    border-radius: 4px;
+    background-color: rgba(var(--bs-secondary-rgb), 0.1);
+    margin-bottom: 0.5rem;
+}
+
+.audit-entry.error {
+    background-color: rgba(var(--bs-danger-rgb), 0.1);
 }
 
 .cypher-query-container-wide {
-    max-height: 300px;
+    max-height: 500px;
     overflow-y: auto;
 }
 </style>
