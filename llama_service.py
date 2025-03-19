@@ -33,10 +33,6 @@ class LlamaService:
                 'related_matches': 0
             }
 
-            # Process query with semantic processor
-            query_entities = self.semantic_processor.extract_entities_from_query(query_text)
-            self.logger.info(f"Extracted entities from query: {query_entities}")
-
             # Generate base chat response
             chat_response = self.generate_response(query_text)
 
@@ -45,31 +41,45 @@ class LlamaService:
                 try:
                     self.logger.info("Attempting to query graph database")
 
-                    # Volleyball-specific content search
+                    # Extract entities from query
+                    query_entities = self.semantic_processor.extract_entities_from_query(query_text)
+                    self.logger.info(f"Extracted entities from query: {query_entities}")
+
+                    # Build smarter search pattern
+                    search_terms = [entity['text'] for entity in query_entities]
+                    if not search_terms:  # If no entities found, use the whole query
+                        search_terms = [query_text]
+
+                    # Create case-insensitive pattern for each term
+                    search_patterns = [f"(?i).*{term}.*" for term in search_terms]
+
+                    # Volleyball-specific player search
                     content_query = """
-                    MATCH (n)
-                    WHERE (n:Player OR n:Skill OR n:Technique OR n:DrillType)
-                    AND n.name =~ $query_pattern
-                    RETURN n.name as name, n.description as description, labels(n) as types
+                    MATCH (n:Player)
+                    WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
+                       OR any(pattern IN $search_patterns WHERE n.description =~ pattern)
+                    WITH n
+                    OPTIONAL MATCH (n)-[r]->(s:Skill)
+                    RETURN n.name as name, n.description as description, 
+                           collect(distinct s.name) as skills,
+                           labels(n) as types
                     LIMIT 5
                     """
 
                     # Related entities query
                     entity_query = """
-                    MATCH (n)-[r]-(m)
-                    WHERE (n:Player OR n:Skill OR n:Technique OR n:DrillType)
-                    AND n.name =~ $query_pattern
-                    RETURN DISTINCT type(r) as relationship, m.name as related_entity
+                    MATCH (n:Player)-[r]-(m)
+                    WHERE any(pattern IN $search_patterns WHERE n.name =~ pattern)
+                    RETURN DISTINCT type(r) as relationship,
+                           m.name as related_entity,
+                           labels(m) as related_types
                     LIMIT 3
                     """
-
-                    # Create case-insensitive pattern
-                    query_pattern = f"(?i).*{query_text}.*"
 
                     # Execute primary content search
                     results = self.graph_db.query(
                         content_query, 
-                        {'query_pattern': query_pattern}
+                        {'search_patterns': search_patterns}
                     )
 
                     related_results = []
@@ -79,7 +89,7 @@ class LlamaService:
                         self.logger.info(f"Found {len(results)} direct matches in knowledge graph")
                         related_results = self.graph_db.query(
                             entity_query,
-                            {'query_pattern': query_pattern}
+                            {'search_patterns': search_patterns}
                         )
 
                         # Prepare context from results
@@ -91,7 +101,8 @@ class LlamaService:
                         query_analysis.update({
                             'found_matches': True,
                             'direct_matches': len(results),
-                            'related_matches': len(related_results)
+                            'related_matches': len(related_results),
+                            'entities_found': query_entities
                         })
                     else:
                         self.logger.info("No direct matches found in knowledge graph")
@@ -104,7 +115,7 @@ class LlamaService:
                                 'query_analysis': query_analysis,
                                 'content_query': content_query,
                                 'entity_query': entity_query,
-                                'parameters': {'query_pattern': query_pattern}
+                                'parameters': {'search_patterns': search_patterns}
                             },
                             'results': {
                                 'direct_matches': results,
@@ -143,13 +154,18 @@ class LlamaService:
 
         context_sections = []
         for result in results:
-            # Format each result based on available fields
+            # Format player information
             if 'name' in result and 'description' in result:
-                context_sections.append(f"{result['name']}: {result['description']}")
+                player_info = f"{result['name']}: {result['description']}"
+                if 'skills' in result and result['skills']:
+                    player_info += f"\nSkills: {', '.join(result['skills'])}"
+                context_sections.append(player_info)
+            # Format relationship information
             elif 'relationship' in result and 'related_entity' in result:
-                context_sections.append(f"Related: {result['related_entity']} ({result['relationship']})")
-            elif 'content' in result:
-                context_sections.append(result['content'])
+                relationship = f"Related: {result['related_entity']}"
+                if 'related_types' in result:
+                    relationship += f" (Type: {', '.join(result['related_types'])})"
+                context_sections.append(relationship)
 
         return "\n".join(context_sections) if context_sections else None
 

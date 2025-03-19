@@ -1,4 +1,3 @@
-from llama_index.embeddings.openai import OpenAIEmbedding
 import logging
 from typing import List, Dict, Optional
 import spacy
@@ -21,14 +20,49 @@ class SemanticProcessor:
                 spacy.cli.download("en_core_web_sm")
                 self.nlp = spacy.load("en_core_web_sm")
 
-            self.embed_model = OpenAIEmbedding(
-                model_name="text-embedding-3-small",
-                dimensions=1536
-            )
             self.logger.info("Initialized semantic processing models")
         except Exception as e:
             self.logger.error(f"Failed to initialize semantic processor: {str(e)}")
             raise
+
+    def extract_entities_from_query(self, query: str) -> List[Dict[str, str]]:
+        """Extract entities from a search query"""
+        try:
+            entities = []
+            doc = self.nlp(query)
+
+            # Extract named entities
+            for ent in doc.ents:
+                entities.append({
+                    'text': ent.text,
+                    'label': ent.label_,
+                    'type': 'named_entity'
+                })
+
+            # Look for domain-specific keywords
+            domain_keywords = {
+                'player': ['player', 'athlete', 'professional'],
+                'skill': ['serve', 'block', 'spike', 'dig', 'set'],
+                'technique': ['approach', 'footwork', 'positioning'],
+                'drill': ['drill', 'exercise', 'practice', 'training']
+            }
+
+            query_lower = query.lower()
+            for category, keywords in domain_keywords.items():
+                for keyword in keywords:
+                    if keyword in query_lower:
+                        entities.append({
+                            'text': keyword,
+                            'label': category.upper(),
+                            'type': 'domain_keyword'
+                        })
+
+            self.logger.debug(f"Extracted entities from query: {entities}")
+            return entities
+
+        except Exception as e:
+            self.logger.error(f"Error extracting entities from query: {str(e)}")
+            return []  # Return empty list on error, let calling code handle this gracefully
 
     def process_document(self, content: str) -> Dict:
         """Extract semantic information from document"""
@@ -36,19 +70,10 @@ class SemanticProcessor:
             # Create document chunks
             chunks = self._create_chunks(content)
 
-            # Generate embeddings for chunks
-            chunk_embeddings = []
-            for chunk in chunks:
-                embedding = self.embed_model.get_text_embedding(chunk)
-                chunk_embeddings.append({
-                    'text': chunk,
-                    'embedding': embedding
-                })
-
             # Extract entities and relationships
             doc = self.nlp(content)
             entities = []
-            relationships = [] # Added initialization for relationships
+            relationships = []
 
             for ent in doc.ents:
                 entities.append({
@@ -70,8 +95,7 @@ class SemanticProcessor:
             return {
                 "entities": entities,
                 "relationships": relationships,
-                "chunks": chunks,
-                "embeddings": chunk_embeddings
+                "chunks": chunks
             }
 
         except Exception as e:

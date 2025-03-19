@@ -27,31 +27,41 @@ class Neo4jDatabase(GraphDatabaseInterface):
                 self.logger.error("Missing Neo4j credentials")
                 return False
 
-            # Parse the URI and log components for debugging
+            # Parse URI components
             parsed_uri = urlparse(uri)
             self.logger.debug(f"Connecting to Neo4j database:")
+            self.logger.debug(f"Original scheme: {parsed_uri.scheme}")
             self.logger.debug(f"Host: {parsed_uri.hostname}")
             self.logger.debug(f"Port: {parsed_uri.port or 7687}")
-            self.logger.debug(f"Scheme: {parsed_uri.scheme}")
 
-            # For AuraDB using neo4j+s:// protocol, we need to convert to bolt+s://
-            if parsed_uri.scheme == 'neo4j+s':
-                connection_uri = f"bolt+s://{parsed_uri.hostname}:{parsed_uri.port or 7687}"
-            else:
-                connection_uri = uri
+            # Map Neo4j protocols to bolt protocols
+            protocol_mapping = {
+                'neo4j': 'bolt',
+                'neo4j+s': 'bolt+s',
+                'neo4j+ssc': 'bolt+ssc',
+                'bolt': 'bolt',
+                'bolt+s': 'bolt+s',
+                'bolt+ssc': 'bolt+ssc'
+            }
 
-            self.logger.info(f"Using connection URI: {connection_uri}")
+            # Get the correct protocol or default to bolt+s for AuraDB
+            protocol = protocol_mapping.get(parsed_uri.scheme, 'bolt+s')
+            port = parsed_uri.port or 7687
 
-            # Create the Graph instance with appropriate settings
+            # Construct the bolt URL
+            bolt_url = f"{protocol}://{parsed_uri.hostname}:{port}"
+            self.logger.info(f"Using bolt URL: {bolt_url}")
+
+            # Initialize the Graph connection
             self.graph = Graph(
-                connection_uri,
+                bolt_url,
                 auth=(username, password),
-                name="neo4j"  # Default database name for AuraDB
+                secure=True  # Required for AuraDB
             )
 
-            # Verify connection with a simple query
-            result = self.graph.run("RETURN 1 as test").data()
-            self.logger.debug(f"Connection test result: {result}")
+            # Verify connection
+            test_result = self.graph.run("RETURN 1 as test").data()
+            self.logger.debug(f"Connection test result: {test_result}")
 
             # Get database info
             count_result = self.graph.run("MATCH (n) RETURN count(n) as count").data()
