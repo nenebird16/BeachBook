@@ -16,12 +16,15 @@ class LlamaService:
     def process_query(self, query_text: str) -> Dict:
         """Process a query using Claude and optionally Neo4j"""
         try:
-            # Initialize query analysis with current timestamp
+            # Get current timestamp for all events
+            current_time = datetime.now().isoformat()
+
+            # Initialize query analysis
             query_analysis = {
                 'input_query': query_text,
-                'query_type': 'content_search',
-                'database_state': 'disconnected',
-                'analysis_timestamp': datetime.now().isoformat(),
+                'query_type': 'knowledge_search',  # Set a default type
+                'database_state': 'connected' if self.graph_db else 'disconnected',
+                'analysis_timestamp': current_time,
                 'parameters': {'query': query_text},
                 'found_matches': False,
                 'direct_matches': 0,
@@ -35,7 +38,6 @@ class LlamaService:
             if self.graph_db:
                 try:
                     self.logger.info("Attempting to query graph database")
-                    query_analysis['database_state'] = 'connected'
 
                     # Define the Cypher queries
                     content_query = """
@@ -94,7 +96,7 @@ class LlamaService:
                 except Exception as e:
                     self.logger.error(f"Error querying graph database: {str(e)}")
                     query_analysis['error'] = str(e)
-                    query_analysis['status'] = 'error'
+                    query_analysis['database_state'] = 'error'
 
             # Return basic response if no graph data available
             return {
