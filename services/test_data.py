@@ -31,13 +31,23 @@ def setup_test_data():
         
         # Process each document
         for doc in docs:
-            doc_node = graph.create_document_node(doc)
-            entities = doc_processor._extract_entities(doc['content'])
-            for entity in entities:
-                graph.create_entity_node(entity, doc_node)
-            
-            # Add embeddings
-            doc['embedding'] = semantic_processor.get_text_embedding(doc['content'])
+            try:
+                logger.info(f"Processing document: {doc['title']}")
+                doc_node = graph.create_document_node(doc)
+                logger.info(f"Created document node: {doc_node}")
+                
+                entities = doc_processor._extract_entities(doc['content'])
+                logger.info(f"Extracted {len(entities)} entities")
+                
+                for entity in entities:
+                    graph.create_entity_node(entity, doc_node)
+                
+                # Add embeddings
+                doc['embedding'] = semantic_processor.get_text_embedding(doc['content'])
+                logger.info(f"Added embeddings of length: {len(doc['embedding'])}")
+            except Exception as e:
+                logger.error(f"Error processing document {doc['title']}: {str(e)}")
+                raise
 
         logger.info("Test data setup complete")
         return True
