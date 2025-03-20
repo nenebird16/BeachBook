@@ -45,13 +45,13 @@
                 </div>
             </div>
 
-            <!-- Audit Trail Section -->
+            <!-- Resources Section -->
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Audit Trail</h5>
+                    <h5 class="card-title mb-0">Knowledge Graph Resources</h5>
                 </div>
                 <div class="card-body">
-                    <div id="auditTrail" class="audit-trail-container"></div>
+                    <div id="auditTrail" class="resources-container"></div>
                 </div>
             </div>
         </div>
@@ -156,20 +156,40 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function updateAuditTrail(queryText, data) {
         const timestamp = formatDate(new Date());
-        const analysis = data.technical_details?.queries?.query_analysis;
-        const hasMatches = analysis?.found_matches || false;
-        const matchCount = analysis?.direct_matches || 0;
-        const relatedCount = analysis?.related_matches || 0;
-
-        auditTrail.innerHTML += `
-            <div class="audit-entry mb-2">
-                <small class="text-muted">${timestamp}</small>
-                <div>Query: "${queryText}"</div>
-                <div>${hasMatches 
-                    ? `Found ${matchCount} direct matches and ${relatedCount} related matches` 
-                    : 'No matches found'}</div>
+        const queries = data.technical_details?.queries;
+        const graphContext = queries?.graph_context;
+        
+        // Parse document titles and entities from graph context
+        const docs = graphContext?.match(/- ([^-\n]+\.txt)/g)?.map(d => d.slice(2)) || [];
+        
+        // Create resource entry
+        let resourceHTML = `
+            <div class="resource-entry mb-3">
+                <div class="resource-header">
+                    <small class="text-muted">${timestamp}</small>
+                    <div class="query-text">Query: "${queryText}"</div>
+                </div>
+                ${docs.length > 0 ? `
+                    <div class="referenced-docs mt-2">
+                        <strong>Referenced Documents:</strong>
+                        <ul class="list-unstyled">
+                            ${docs.map(doc => `<li>📄 ${doc}</li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+                ${queries?.semantic_data ? `
+                    <div class="semantic-focus mt-2">
+                        <strong>Query Focus:</strong>
+                        <ul class="list-unstyled">
+                            ${queries.semantic_data.focus?.main_noun ? `<li>Main Topic: ${queries.semantic_data.focus.main_noun}</li>` : ''}
+                            ${queries.semantic_data.focus?.root_verb ? `<li>Action: ${queries.semantic_data.focus.root_verb}</li>` : ''}
+                        </ul>
+                    </div>
+                ` : ''}
             </div>
         `;
+        
+        auditTrail.innerHTML += resourceHTML;
         scrollToBottom(auditTrail);
     }
 
