@@ -212,7 +212,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             ORDER BY embedding_score DESC
             LIMIT 5
             """
-            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.embed(query_text), keyword=keyword).data()
+            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.get_text_embedding(query_text), keyword=keyword).data()
 
 
             if not entity_results and not doc_results:
