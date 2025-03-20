@@ -4,6 +4,7 @@ import time
 from typing import Dict, List, Any, Optional
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from anthropic import Anthropic
+from openai import OpenAI
 from services.semantic_processor import SemanticProcessor
 
 logger = logging.getLogger(__name__)
@@ -13,40 +14,59 @@ class LlamaService:
         """Initialize the LlamaService with required components"""
         self.logger = logging.getLogger(__name__)
         self._anthropic = None
+        self._openai = None
         self._graph = None
         self._semantic_processor = None
 
-        # Initialize only the core Anthropic client
-        self._init_anthropic()
+        # Try to initialize LLM clients
+        self._init_llm_clients()
 
         # Log initialization status
         self.logger.info("LlamaService initialization complete. Status:")
         self.logger.info(f"- Anthropic client: {'Available' if self._anthropic else 'Unavailable'}")
+        self.logger.info(f"- OpenAI client: {'Available' if self._openai else 'Unavailable'}")
         self.logger.info("Optional components will be initialized on first use")
 
-    def _init_anthropic(self):
-        """Initialize the Anthropic client and semantic processor"""
+    def _init_llm_clients(self):
+        """Initialize available LLM clients"""
         try:
             start_time = time.time()
-            api_key = os.environ.get('ANTHROPIC_API_KEY')
+            
+            # Try Anthropic first
+            anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
+            if anthropic_key:
+                try:
+                    self._anthropic = Anthropic()
+                    self.logger.info("Anthropic client initialized successfully")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize Anthropic: {str(e)}")
+                    self._anthropic = None
+            else:
+                self.logger.warning("ANTHROPIC_API_KEY not found")
 
-            if not api_key:
-                self.logger.warning("ANTHROPIC_API_KEY not found in environment variables")
-                return
+            # Try OpenAI if Anthropic is not available
+            if not self._anthropic:
+                openai_key = os.environ.get('OPENAI_API_KEY')
+                if openai_key:
+                    try:
+                        self._openai = OpenAI()
+                        self.logger.info("OpenAI client initialized successfully")
+                    except Exception as e:
+                        self.logger.error(f"Failed to initialize OpenAI: {str(e)}")
+                        self._openai = None
+                else:
+                    self.logger.warning("OPENAI_API_KEY not found")
 
-            try:
-                self._anthropic = Anthropic()
+            # Initialize semantic processor if any LLM client is available
+            if self._anthropic or self._openai:
                 self._semantic_processor = SemanticProcessor()
                 init_time = time.time() - start_time
-                self.logger.info(f"Anthropic client and semantic processor initialized successfully in {init_time:.2f} seconds")
-            except Exception as e:
-                self.logger.error(f"Failed to initialize services: {str(e)}")
-                self._anthropic = None
-                self._semantic_processor = None
+                self.logger.info(f"Services initialized in {init_time:.2f} seconds")
 
         except Exception as e:
             self.logger.error(f"Error during service initialization: {str(e)}", exc_info=True)
             self._anthropic = None
+            self._openai = None
             self._semantic_processor = None
 
     @property
@@ -121,17 +141,14 @@ class LlamaService:
             }
 
     def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
-        """Generate a natural language response using Claude"""
+        """Generate a natural language response using available LLM"""
         try:
-            if not self.anthropic:
+            if not self._anthropic and not self._openai:
                 return "The knowledge service is currently unavailable. Please try again later."
 
             self.logger.debug("Starting response generation")
             self.logger.debug(f"Query: {query}")
             self.logger.debug(f"Context available: {'Yes' if context_info else 'No'}")
-
-            # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
-            model = "claude-3-5-sonnet-20241022"
 
             system_message = "I am a knowledge graph assistant that only provides information from the connected graph database. I stay focused on available content and politely decline general conversation."
 
@@ -162,21 +179,33 @@ Since I don't find any matches in the knowledge graph for this query, I should:
 3. Keep the response brief and focused"""
 
             try:
-                self.logger.debug("Sending request to Anthropic")
-                response = self.anthropic.messages.create(
-                    model=model,
-                    max_tokens=1000,
-                    temperature=0.7,
-                    messages=[
-                        {"role": "assistant", "content": system_message},
-                        {"role": "user", "content": user_message}
-                    ]
-                )
-                self.logger.debug("Successfully received response from Anthropic")
-                return response.content[0].text
+                if self._anthropic:
+                    self.logger.debug("Using Anthropic for response generation")
+                    response = self._anthropic.messages.create(
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=1000,
+                        temperature=0.7,
+                        messages=[
+                            {"role": "assistant", "content": system_message},
+                            {"role": "user", "content": user_message}
+                        ]
+                    )
+                    return response.content[0].text
+                else:
+                    self.logger.debug("Using OpenAI for response generation")
+                    response = self._openai.chat.completions.create(
+                        model="gpt-4-turbo-preview",
+                        max_tokens=1000,
+                        temperature=0.7,
+                        messages=[
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": user_message}
+                        ]
+                    )
+                    return response.choices[0].message.content
 
             except Exception as e:
-                self.logger.error(f"Error calling Anthropic API: {str(e)}", exc_info=True)
+                self.logger.error(f"Error calling LLM API: {str(e)}", exc_info=True)
                 self.logger.error(f"Exception type: {type(e)}")
                 self.logger.error(f"Exception args: {e.args}")
                 raise
