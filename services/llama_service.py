@@ -328,7 +328,11 @@ class LlamaService:
             norm2 + $embedding[i] * $embedding[i]))) AS score
         WITH d, score
         WHERE d.title CONTAINS 'Create Lasting Adaptations'
-        RETURN d.title, d.content, score
+        RETURN {
+            title: d.title,
+            content: d.content,
+            score: score
+        } as document
         ORDER BY score DESC
         LIMIT 5
         """
@@ -336,7 +340,7 @@ class LlamaService:
 
     def _get_relevant_entities(self, documents):
         """Get entities from relevant documents"""
-        doc_titles = [doc['title'] for doc in documents]
+        doc_titles = [doc['document']['title'] for doc in documents]
         query = """
         MATCH (d:Document)-[:CONTAINS]->(e:Entity)
         WHERE d.title IN $titles
