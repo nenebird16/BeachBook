@@ -1,8 +1,10 @@
+
 import logging
 import spacy
 import nltk
 from nltk.tokenize import sent_tokenize
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -12,34 +14,22 @@ nltk.download('punkt', quiet=True)
 
 class SemanticProcessor:
     def __init__(self):
-        """Initialize the semantic processor with spaCy model and word vectors"""
+        """Initialize the semantic processor with spaCy model and sentence transformers"""
         self.logger = logging.getLogger(__name__)
         try:
             # Initialize spaCy model
             self.logger.info("Initializing spaCy model...")
             try:
-                # Use en_core_web_md for word vectors
                 self.nlp = spacy.load("en_core_web_md")
-
-                # Verify model and vectors
-                self.logger.info(f"SpaCy model loaded: {self.nlp.meta['name']}")
-                self.logger.info(f"Model pipeline components: {self.nlp.pipe_names}")
-                self.logger.info(f"Vector size: {self.nlp.vocab.vectors_length}")
-                self.logger.info(f"Number of vectors: {len(self.nlp.vocab.vectors)}")
-
-                # Test vectors with a sample word
-                test_doc = self.nlp("volleyball")
-                if test_doc.has_vector:
-                    self.logger.info("Word vectors verified successfully")
-                else:
-                    raise ValueError("Word vectors not available in loaded model")
-
             except OSError:
                 self.logger.warning("SpaCy model not found, downloading now...")
                 spacy.cli.download("en_core_web_md")
                 self.nlp = spacy.load("en_core_web_md")
-                self.logger.info("SpaCy model downloaded and loaded successfully")
 
+            # Initialize sentence transformer
+            self.logger.info("Initializing sentence transformer model...")
+            self.transformer = SentenceTransformer('all-MiniLM-L6-v2')
+            
             self.logger.info("Successfully initialized semantic processing")
 
         except Exception as e:
@@ -47,13 +37,10 @@ class SemanticProcessor:
             raise
 
     def get_text_embedding(self, text: str) -> list:
-        """Get text embedding using spaCy's word vectors"""
+        """Get text embedding using sentence transformers"""
         try:
-            doc = self.nlp(text)
-            if doc.has_vector:
-                return doc.vector.tolist()
-            self.logger.warning(f"No vector available for text: {text[:50]}...")
-            return [0.0] * self.nlp.vocab.vectors_length  # Return zero vector with correct dimension
+            embedding = self.transformer.encode(text, convert_to_numpy=True)
+            return embedding.tolist()
         except Exception as e:
             self.logger.error(f"Error generating text embedding: {str(e)}")
             raise
