@@ -31,7 +31,7 @@ class LlamaService:
         """Initialize available LLM clients"""
         try:
             start_time = time.time()
-            
+
             # Try Anthropic first
             anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
             if anthropic_key:
@@ -227,11 +227,11 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             MATCH (e:Entity)
             WHERE e.name IS NOT NULL
             AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
-            
+
             // Get connected documents and relationships
             OPTIONAL MATCH (d:Document)-[r:CONTAINS]->(e)
             WHERE d.title IS NOT NULL
-            
+
             // Aggregate results with scoring
             WITH e,
                  collect(DISTINCT {
@@ -239,7 +239,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                    relationship: type(r)
                  }) as document_refs,
                  count(DISTINCT d) as doc_count
-            
+
             RETURN {
               name: e.name,
               type: e.type,
@@ -251,7 +251,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             """
             # Split query into keywords and remove punctuation
             keywords = [word.strip('?.,!') for word in query_text.lower().split()]
-            
+
             entity_results = self.graph.run(entity_query, 
                                           keywords=keywords,
                                           entities=query_entities).data()
@@ -297,31 +297,49 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                 return None
 
             # Format overview
-            overview = []
+            overview = self._prepare_context(doc_results + entity_results)
 
-            # Add document information
-            if doc_results:
-                overview.append(f"Documents:")
-                for result in doc_results:
-                    overview.append(f"- {result['doc_info']['title']}")
-                overview.append("")
-
-            # Add entity information
-            if entity_results:
-                overview.append("Topics and concepts found:")
-                for result in entity_results:
-                    entity_info = result['entity_info']
-                    if entity_info['type'] and entity_info['name']:
-                        entity_type = entity_info['type']
-                        name = entity_info['name']
-                        docs = entity_info['documents']
-                        overview.append(f"- {entity_type.title()}: {name}")
-                        if docs:
-                            overview.append(f"  Found in: {', '.join(docs)}")
-                overview.append("")
-
-            return "\n".join(overview)
+            return overview
 
         except Exception as e:
             self.logger.error(f"Error getting graph overview: {str(e)}")
+            return None
+
+    def _prepare_context(self, results: List[Dict]) -> str:
+        """Prepare context information from query results"""
+        try:
+            # Format documents section with reference numbers
+            docs = {}  # Use dict to maintain document order
+            entities = []
+            ref_count = 1
+
+            for result in results:
+                if 'title' in result and result['title'] not in docs:
+                    docs[result['title']] = ref_count
+                    ref_count += 1
+                if 'name' in result:
+                    entity_info = {
+                        'name': result['name'],
+                        'type': result.get('type', 'Unknown'),
+                        'documents': result.get('documents', []),
+                        'ref_num': docs.get(result.get('source_doc', ''), '')
+                    }
+                    entities.append(entity_info)
+
+            context = "Referenced Documents:\n"
+            context += "\n".join([f"[{ref_num}] {doc}" for doc, ref_num in docs.items()])
+
+            if entities:
+                context += "\n\nTopics and concepts found:\n"
+                for entity in entities:
+                    ref_str = f"[{entity['ref_num']}]" if entity['ref_num'] else ''
+                    context += f"- {entity['type']}: {entity['name']} {ref_str}\n"
+                    if entity['documents']:
+                        for doc in entity['documents']:
+                            if doc in docs:
+                                context += f"  Referenced in: [{docs[doc]}]\n"
+
+            return context
+        except Exception as e:
+            self.logger.error(f"Error preparing context: {str(e)}")
             return None
