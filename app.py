@@ -151,7 +151,7 @@ def query_knowledge():
                 'response': 'Sorry, there was an error processing your request.'
             }), 400
 
-        query = request.json.get('query')
+        query = request.get_json().get('query')
         if not query:
             return jsonify({
                 'error': 'No query provided',
@@ -164,30 +164,39 @@ def query_knowledge():
             logger.error("LlamaService not initialized")
             return jsonify({
                 'error': 'Service unavailable',
-                'response': 'The knowledge service is currently unavailable. Please try the health check endpoint (/health) to verify service status.'
+                'response': 'The knowledge service is currently unavailable. Please check the /health endpoint for service status.'
             }), 503
+
+        # Log query details
+        logger.info(f"Processing query: {query}")
+        logger.debug(f"Current service statuses: Graph DB: {bool(app.config.get('graph_db'))}, "
+                    f"Semantic Processor: {bool(app.config.get('semantic_processor'))}")
 
         # Process the query
         try:
             result = llama_service.process_query(query)
             if not result:
+                logger.error("Empty response from LlamaService")
                 raise ValueError("Empty response from LlamaService")
+
+            logger.debug(f"Query result: {result}")
+
+            # Format response for frontend
+            response = {
+                'response': result.get('response', 'I apologize, but I was unable to generate a response.'),
+                'technical_details': {
+                    'queries': result.get('technical_details', {}).get('queries', {})
+                }
+            }
+
+            return jsonify(response), 200
+
         except Exception as e:
             logger.error(f"Error processing query with LlamaService: {str(e)}", exc_info=True)
             return jsonify({
                 'error': 'Service error',
                 'response': 'Sorry, I encountered an error while processing your request. Please try again.'
             }), 500
-
-        # Format response for frontend
-        response = {
-            'response': result.get('response', 'I apologize, but I was unable to generate a response.'),
-            'technical_details': {
-                'queries': result.get('technical_details', {}).get('queries', {})
-            }
-        }
-
-        return jsonify(response), 200
 
     except Exception as e:
         logger.error(f"Unexpected error in query endpoint: {str(e)}", exc_info=True)

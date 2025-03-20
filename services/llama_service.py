@@ -22,9 +22,18 @@ class LlamaService:
         try:
             self.logger.info("Initializing LlamaService components...")
 
+            # Verify Anthropic API key
+            api_key = os.environ.get('ANTHROPIC_API_KEY')
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
+
             # Initialize Anthropic client
-            self.anthropic = Anthropic()
-            self.logger.debug("Anthropic client initialized")
+            try:
+                self.anthropic = Anthropic()
+                self.logger.debug("Anthropic client initialized")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize Anthropic client: {str(e)}")
+                raise ValueError(f"Failed to initialize Anthropic client: {str(e)}")
 
             # Initialize and verify semantic processor
             self.logger.info("Initializing semantic processor...")
@@ -33,6 +42,15 @@ class LlamaService:
             # Initialize query templates
             self.query_templates = QueryTemplates()
             self.logger.debug("Query templates initialized")
+
+            # Verify spaCy model and vectors
+            if not hasattr(self.semantic_processor, 'nlp'):
+                self.logger.error("Semantic processor's spaCy model not initialized")
+                raise ValueError("Semantic processor's spaCy model not initialized")
+
+            if not self.semantic_processor.nlp.has_vector:
+                self.logger.error("Semantic processor's spaCy model has no word vectors")
+                raise ValueError("Semantic processor's spaCy model has no word vectors")
 
             # Test vector generation
             test_text = "volleyball skills"
@@ -88,23 +106,8 @@ class LlamaService:
         try:
             self.logger.info(f"Processing query: {query_text}")
 
-            # Execute semantic search first
-            semantic_data = self.semantic_processor.analyze_query(query_text)
-            query_embedding = semantic_data['embedding']
-            
-            # Find semantically similar documents
-            similar_docs = self._find_similar_documents(query_embedding)
-            
-            # Get relevant entities from those documents
-            relevant_entities = self._get_relevant_entities(similar_docs)
-            
-            # Get focused context based on query type
-            graph_results = self._get_focused_context(
-                query_text, 
-                semantic_data['focus'],
-                similar_docs,
-                relevant_entities
-            )
+            # Get graph context
+            graph_results = self._get_graph_overview()
 
             # Generate response using Claude
             response = self.generate_response(query_text, graph_results)
@@ -113,7 +116,6 @@ class LlamaService:
                 'response': response,
                 'technical_details': {
                     'queries': {
-                        'semantic_data': semantic_data,
                         'graph_context': graph_results
                     }
                 }
