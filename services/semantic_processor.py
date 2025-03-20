@@ -20,6 +20,26 @@ class SemanticProcessor:
                 spacy.cli.download("en_core_web_sm")
                 self.nlp = spacy.load("en_core_web_sm")
 
+            # Initialize sentence transformer for embeddings
+            from sentence_transformers import SentenceTransformer
+            self.embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+            # Initialize domain patterns
+            self.domain_patterns = {
+                "Skill": [
+                    "passing", "setting", "hitting", "attacking", "blocking", "serving", 
+                    "defense", "digging", "jump serve", "float serve", "cut shot"
+                ],
+                "Drill": [
+                    "pepper", "queen of the court", "mini-game", "scrimmage",
+                    "target practice", "serve receive", "block touch"
+                ],
+                "VisualElement": [
+                    "ball tracking", "peripheral vision", "trajectory prediction",
+                    "depth perception", "pattern recognition", "visual focus"
+                ]
+            }
+
             self.logger.info("Initialized semantic processing models")
         except Exception as e:
             self.logger.error(f"Failed to initialize semantic processor: {str(e)}")
