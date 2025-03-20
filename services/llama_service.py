@@ -296,17 +296,22 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             if not entity_results and not doc_results:
                 return None
 
-            # Format overview
+            # Format overview as a numbered reference list
             overview = []
+            ref_count = 1
+            doc_refs = {}
 
-            # Add document information
+            # Add document information with reference numbers
             if doc_results:
-                overview.append(f"Documents:")
+                overview.append("Referenced Documents:")
                 for result in doc_results:
-                    overview.append(f"- {result['doc_info']['title']}")
+                    title = result['doc_info']['title']
+                    doc_refs[title] = ref_count
+                    overview.append(f"[{ref_count}] {title}")
+                    ref_count += 1
                 overview.append("")
 
-            # Add entity information
+            # Add entity information with corresponding references
             if entity_results:
                 overview.append("Topics and concepts found:")
                 for result in entity_results:
@@ -317,7 +322,9 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                         docs = entity_info['documents']
                         overview.append(f"- {entity_type.title()}: {name}")
                         if docs:
-                            overview.append(f"  Found in: {', '.join(docs)}")
+                            ref_nums = [f"[{doc_refs[doc]}]" for doc in docs if doc in doc_refs]
+                            if ref_nums:
+                                overview.append(f"  Referenced in: {' '.join(ref_nums)}")
                 overview.append("")
 
             return "\n".join(overview)
