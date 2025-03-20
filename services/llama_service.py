@@ -239,7 +239,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                  d.embedding as doc_embedding,
                  $embedding as query_embedding,
                  count(distinct e) as entity_matches
-            WITH doc_info, doc_embedding, query_embedding,
+            WITH doc_info, doc_embedding, query_embedding, entity_matches,
                  CASE 
                     WHEN doc_embedding IS NOT NULL
                     THEN reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
@@ -249,9 +249,8 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                          sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
                          norm + query_embedding[i] * query_embedding[i])))
                     ELSE 0.0
-                 END as semantic_score,
-                 entity_matches
-            WITH doc_info, 
+                 END as semantic_score
+            WITH doc_info, entity_matches,
                  semantic_score * 0.6 + 
                  CASE WHEN entity_matches > 0 
                  THEN 0.4 * (entity_matches/5.0) ELSE 0 END as combined_score
