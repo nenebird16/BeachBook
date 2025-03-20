@@ -196,18 +196,32 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             query_entities = [ent.text.lower() for ent in doc.ents]
             keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
 
-            # Entity-focused query
+            # Enhanced entity-focused query
             entity_query = """
+            // Match entities based on name matches
             MATCH (e:Entity)
-            WHERE any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
-            WITH e
-            OPTIONAL MATCH (d:Document)-[:CONTAINS]->(e)
-            WITH e, collect(DISTINCT d.title) as documents
-            RETURN e.name as name,
-                   e.type as type,
-                   documents,
-                   size(documents) as relevance
-            ORDER BY relevance DESC
+            WHERE e.name IS NOT NULL
+            AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
+            
+            // Get connected documents and relationships
+            OPTIONAL MATCH (d:Document)-[r:CONTAINS]->(e)
+            WHERE d.title IS NOT NULL
+            
+            // Aggregate results with scoring
+            WITH e,
+                 collect(DISTINCT {
+                   title: d.title,
+                   relationship: type(r)
+                 }) as document_refs,
+                 count(DISTINCT d) as doc_count
+            
+            RETURN {
+              name: e.name,
+              type: e.type,
+              documents: [doc in document_refs | doc.title],
+              relevance: doc_count
+            } as entity_info
+            ORDER BY entity_info.relevance DESC
             LIMIT 10
             """
             entity_results = self.graph.run(entity_query, 
