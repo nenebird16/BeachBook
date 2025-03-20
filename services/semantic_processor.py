@@ -3,26 +3,35 @@ from typing import List, Dict, Optional
 import spacy
 import nltk
 from nltk.tokenize import sent_tokenize
+from sentence_transformers import SentenceTransformer
 
 # Download required NLTK data
 nltk.download('punkt', quiet=True)
-nltk.download('punkt_tab', quiet=True)
 
 class SemanticProcessor:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         try:
             # Initialize spaCy model
+            self.logger.info("Initializing spaCy model...")
             try:
                 self.nlp = spacy.load("en_core_web_sm")
+                self.logger.info("Successfully loaded spaCy model")
             except OSError:
                 self.logger.info("Downloading spaCy model...")
                 spacy.cli.download("en_core_web_sm")
                 self.nlp = spacy.load("en_core_web_sm")
 
             # Initialize sentence transformer for embeddings
-            from sentence_transformers import SentenceTransformer
-            self.embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+            self.logger.info("Initializing SentenceTransformer model...")
+            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+            if not hasattr(self.model, 'encode'):
+                raise ValueError("SentenceTransformer model not properly initialized")
+            # Test encoding to verify model
+            test_encoding = self.model.encode("Test sentence")
+            if test_encoding is None or len(test_encoding) == 0:
+                raise ValueError("SentenceTransformer model failed to generate embeddings")
+            self.logger.info("Successfully loaded and verified SentenceTransformer model")
 
             # Initialize domain patterns
             self.domain_patterns = {
@@ -40,7 +49,7 @@ class SemanticProcessor:
                 ]
             }
 
-            self.logger.info("Initialized semantic processing models")
+            self.logger.info("Initialized semantic processing models successfully")
         except Exception as e:
             self.logger.error(f"Failed to initialize semantic processor: {str(e)}")
             raise
@@ -112,10 +121,20 @@ class SemanticProcessor:
                         "object": token.text
                     })
 
+            # Generate embeddings for chunks
+            embeddings = []
+            for chunk in chunks:
+                embedding = self.model.encode(chunk)
+                embeddings.append({
+                    "text": chunk,
+                    "embedding": embedding.tolist()
+                })
+
             return {
                 "entities": entities,
                 "relationships": relationships,
-                "chunks": chunks
+                "chunks": chunks,
+                "embeddings": embeddings
             }
 
         except Exception as e:
@@ -125,13 +144,17 @@ class SemanticProcessor:
     def analyze_query(self, query: str) -> Dict:
         """Analyze query for semantic search"""
         try:
+            self.logger.debug(f"Analyzing query: {query}")
+
             # Generate query embedding
-            query_embedding = self.embed_model.get_text_embedding(query)
+            query_embedding = self.model.encode(query)
+            self.logger.debug("Generated query embedding successfully")
 
             # Extract query entities and intent
             doc = self.nlp(query)
             query_entities = [{'text': ent.text, 'label': ent.label_}
                             for ent in doc.ents]
+            self.logger.debug(f"Extracted entities: {query_entities}")
 
             # Identify main focus of query
             root = next(token for token in doc if token.head == token)
@@ -140,12 +163,15 @@ class SemanticProcessor:
                 'main_noun': next((token.text for token in doc
                                  if token.pos_ == 'NOUN'), None)
             }
+            self.logger.debug(f"Query focus: {focus}")
 
-            return {
-                'embedding': query_embedding,
+            result = {
+                'embedding': query_embedding.tolist(),
                 'entities': query_entities,
                 'focus': focus
             }
+            self.logger.debug("Query analysis completed successfully")
+            return result
 
         except Exception as e:
             self.logger.error(f"Error analyzing query: {str(e)}")

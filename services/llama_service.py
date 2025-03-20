@@ -26,8 +26,10 @@ class LlamaService:
             self.logger.info("Initializing semantic processor...")
             self.semantic_processor = SemanticProcessor()
             if not hasattr(self.semantic_processor, 'model'):
+                self.logger.error("Semantic processor model not properly initialized")
                 raise ValueError("Semantic processor model not properly initialized")
-            self.logger.info("Semantic processor initialized successfully")
+            else:
+                self.logger.info("Semantic processor initialized successfully")
 
             self.query_templates = QueryTemplates()
             self.logger.debug("Query templates initialized")
