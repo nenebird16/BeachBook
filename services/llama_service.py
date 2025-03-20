@@ -1,7 +1,8 @@
-from llama_index.core import Settings
-from llama_index.graph_stores.neo4j import Neo4jGraphStore
+import os
 import logging
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+from llama_index.core import Settings
+from llama_index.graph_stores.neo4j import Neo4jGraphStore
 from urllib.parse import urlparse
 from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
@@ -14,14 +15,23 @@ class LlamaService:
         self.logger = logging.getLogger(__name__)
         Settings.llm_api_key = None  # We won't be using LlamaIndex's LLM features
 
-        # Initialize Anthropic client for Claude
-        self.anthropic = Anthropic()
-
-        # Initialize semantic processor
-        self.semantic_processor = SemanticProcessor()
-        self.query_templates = QueryTemplates()
-
         try:
+            self.logger.info("Initializing LlamaService components...")
+
+            # Initialize Anthropic client for Claude
+            self.anthropic = Anthropic()
+            self.logger.debug("Anthropic client initialized")
+
+            # Initialize semantic processor
+            self.logger.info("Initializing semantic processor...")
+            self.semantic_processor = SemanticProcessor()
+            if not hasattr(self.semantic_processor, 'model'):
+                raise ValueError("Semantic processor model not properly initialized")
+            self.logger.info("Semantic processor initialized successfully")
+
+            self.query_templates = QueryTemplates()
+            self.logger.debug("Query templates initialized")
+
             if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
                 raise ValueError("Neo4j credentials not properly configured")
 
@@ -47,6 +57,10 @@ class LlamaService:
             self.graph = Graph(profile=profile)
             self.logger.info("Successfully connected to Neo4j database")
 
+            # Test Neo4j connection
+            test_result = self.graph.run("RETURN 1 as test").data()
+            self.logger.debug(f"Neo4j test query result: {test_result}")
+
             # Initialize graph store for LlamaIndex
             self.graph_store = Neo4jGraphStore(
                 username=NEO4J_USER,
@@ -57,7 +71,7 @@ class LlamaService:
             self.logger.info("Successfully initialized Neo4j graph store")
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize Neo4j connections: {str(e)}")
+            self.logger.error(f"Failed to initialize LlamaService: {str(e)}")
             raise
 
     def process_document(self, content: str) -> bool:
@@ -80,8 +94,8 @@ class LlamaService:
                         SET d.embedding = $embedding
                         """
                         self.graph.run(query, 
-                                    content_preview=content_preview,
-                                    embedding=chunk['embedding'])
+                                        content_preview=content_preview,
+                                        embedding=chunk['embedding'])
                     except Exception as e:
                         self.logger.error(f"Error storing embedding: {str(e)}")
                         continue
@@ -95,6 +109,10 @@ class LlamaService:
     def generate_response(self, query: str, context_info: str = None) -> str:
         """Generate a natural language response using Claude"""
         try:
+            self.logger.debug("Starting response generation")
+            self.logger.debug(f"Query: {query}")
+            self.logger.debug(f"Context available: {'Yes' if context_info else 'No'}")
+
             if context_info:
                 prompt = f"""Based on the following context from a knowledge graph, help me answer this query: "{query}"
 
@@ -146,23 +164,31 @@ class LlamaService:
 
                     Response:"""
 
-            response = self.anthropic.messages.create(
-                model="claude-3-opus-20240229",
-                max_tokens=1000,
-                temperature=0.7,
-                messages=[
-                    {
-                        "role": "assistant",
-                        "content": "I am a knowledge graph assistant that only provides information from the connected graph database. I stay focused on available content and politely decline general conversation."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            )
+            self.logger.debug("Sending request to Anthropic")
+            try:
+                response = self.anthropic.messages.create(
+                    model="claude-3-opus-20240229",
+                    max_tokens=1000,
+                    temperature=0.7,
+                    messages=[
+                        {
+                            "role": "assistant",
+                            "content": "I am a knowledge graph assistant that only provides information from the connected graph database. I stay focused on available content and politely decline general conversation."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ]
+                )
+                self.logger.debug("Successfully received response from Anthropic")
+                return response.content[0].text
 
-            return response.content[0].text
+            except Exception as e:
+                self.logger.error(f"Error calling Anthropic API: {str(e)}")
+                self.logger.error(f"Exception type: {type(e)}")
+                self.logger.error(f"Exception args: {e.args}")
+                raise
 
         except Exception as e:
             self.logger.error(f"Error generating Claude response: {str(e)}")
@@ -173,93 +199,20 @@ class LlamaService:
         try:
             self.logger.info(f"Processing query: {query_text}")
 
-            # Analyze query semantically
-            query_analysis = self.semantic_processor.analyze_query(query_text)
-            query_embedding = query_analysis['embedding']
+            # Verify components are initialized
+            if not hasattr(self, 'semantic_processor') or not hasattr(self.semantic_processor, 'model'):
+                raise RuntimeError("Semantic processor not properly initialized")
+            if not hasattr(self, 'graph') or not self.graph:
+                raise RuntimeError("Neo4j connection not established")
 
-            # Vector similarity search
-            vector_query = """
-            CALL db.index.vector.queryNodes(
-                'document_embeddings',
-                5,
-                $embedding
-            ) YIELD node, score
-            WITH node, score
-            MATCH (node)-[:CONTAINS]->(e:Entity)
-            RETURN node.content as content,
-                   node.title as title,
-                   collect(distinct e.name) as entities,
-                   score as relevance
-            ORDER BY relevance DESC
-            """
-            vector_results = self.graph.run(vector_query, 
-                                        embedding=query_embedding).data()
-            self.logger.debug(f"Vector query results: {vector_results}")
-
-            # Content-based search as backup
-            content_query = """
-            MATCH (d:Document)
-            WHERE toLower(d.content) CONTAINS toLower($query)
-            MATCH (d)-[r:CONTAINS]->(e:Entity)
-            RETURN d.content as content, 
-                   d.title as title,
-                   collect(distinct e.name) as entities,
-                   count(e) as relevance
-            ORDER BY relevance DESC
-            LIMIT 5
-            """
-            content_results = self.graph.run(content_query, 
-                                        query=query_text).data()
-            self.logger.debug(f"Content query results: {content_results}")
-
-            # Entity-based expansion
-            entity_query = """
-            MATCH (e:Entity)
-            WHERE toLower(e.name) CONTAINS toLower($query)
-            WITH e
-            MATCH (d:Document)-[:CONTAINS]->(e)
-            RETURN d.content as content,
-                   d.title as title,
-                   collect(distinct e.name) as entities
-            LIMIT 5
-            """
-            entity_results = self.graph.run(entity_query, 
-                                        query=query_text).data()
-            self.logger.debug(f"Entity query results: {entity_results}")
-
-            # Combine and deduplicate results
-            all_results = vector_results + content_results + entity_results
-            seen_titles = set()
-            unique_results = []
-            for result in all_results:
-                if result.get('title') not in seen_titles:
-                    seen_titles.add(result.get('title'))
-                    unique_results.append(result)
-
-            # Prepare context for AI response
-            context_info = None
-            if unique_results:
-                context_sections = []
-                for result in unique_results[:5]:  # Top 5 unique results
-                    context_sections.append(f"Document: {result.get('title', 'Untitled')}")
-                    context_sections.append(f"Content: {result.get('content', '')[:500]}")
-                    if result.get('entities'):
-                        context_sections.append(
-                            f"Related concepts: {', '.join(result['entities'])}")
-                    context_sections.append("")
-                context_info = "\n".join(context_sections)
-
-            # Generate AI response
-            ai_response = self.generate_response(query_text, context_info)
-
+            # DEBUG: Return test response to verify endpoint
+            self.logger.debug("Returning debug response to verify endpoint functionality")
             return {
-                'response': ai_response,
+                'response': f"Debug response - Query received: {query_text}",
                 'technical_details': {
                     'queries': {
-                        'vector_query': vector_query,
-                        'content_query': content_query,
-                        'entity_query': entity_query,
-                        'query_analysis': query_analysis
+                        'debug_mode': True,
+                        'query_text': query_text
                     }
                 }
             }
