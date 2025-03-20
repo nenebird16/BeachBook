@@ -1,3 +1,4 @@
+
 import logging
 import nltk
 from nltk.tokenize import sent_tokenize
@@ -48,17 +49,9 @@ class SemanticProcessor:
                     "embedding": embedding
                 })
 
-            # Basic entity extraction based on capitalization
+            # Extract entities using basic NLP techniques
             words = content.split()
-            entities = []
-            for word in words:
-                if word[0].isupper() and len(word) > 1:
-                    entities.append({
-                        "text": word,
-                        "label": "ENTITY",
-                        "start": content.index(word),
-                        "end": content.index(word) + len(word)
-                    })
+            entities = self._extract_entities(content)
 
             return {
                 "entities": entities,
@@ -80,9 +73,7 @@ class SemanticProcessor:
             self.logger.debug("Generated query embedding successfully")
 
             # Basic query analysis
-            words = query.split()
-            query_entities = [{'text': word, 'label': 'TOKEN'} 
-                            for word in words if word[0].isupper()]
+            query_entities = self._extract_entities(query)
 
             result = {
                 'embedding': query_embedding,
@@ -122,3 +113,24 @@ class SemanticProcessor:
         except Exception as e:
             self.logger.error(f"Error creating chunks: {str(e)}")
             return [text]  # Return the full text as a single chunk if chunking fails
+
+    def _extract_entities(self, text: str) -> list:
+        """Extract entities using basic NLP techniques"""
+        entities = []
+        sentences = sent_tokenize(text)
+        
+        for sentence in sentences:
+            words = sentence.split()
+            for word in words:
+                # Basic named entity detection based on capitalization
+                if word[0].isupper() and len(word) > 1:
+                    start = text.find(word)
+                    if start != -1:
+                        entities.append({
+                            "text": word,
+                            "label": "ENTITY",
+                            "start": start,
+                            "end": start + len(word)
+                        })
+        
+        return entities
