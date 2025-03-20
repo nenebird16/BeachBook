@@ -221,6 +221,16 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             query_entities = [entity['text'].lower() for entity in semantic_analysis['entities']]
             keywords = query_text.lower().split()
 
+            # Initial keyword matching query
+            keyword_query = """
+            MATCH (d:Document)
+            WHERE any(keyword IN $keywords 
+                WHERE toLower(d.title) CONTAINS toLower(keyword))
+            RETURN d.title as matching_docs
+            """
+            keyword_matches = self.graph.run(keyword_query, 
+                                           keywords=keywords).data()
+            
             # Enhanced entity-focused query
             entity_query = """
             // Match entities and their relationships
