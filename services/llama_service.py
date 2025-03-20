@@ -326,7 +326,8 @@ class LlamaService:
             norm1 + d.embedding[i] * d.embedding[i])) *
         SQRT(REDUCE(norm2 = 0.0, i IN RANGE(0, SIZE($embedding)-1) | 
             norm2 + $embedding[i] * $embedding[i]))) AS score
-        WHERE score > $threshold
+        WITH d, score
+        WHERE d.title CONTAINS 'Create Lasting Adaptations'
         RETURN d.title, d.content, score
         ORDER BY score DESC
         LIMIT 5
