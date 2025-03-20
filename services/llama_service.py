@@ -314,10 +314,14 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             if entity_results:
                 overview.append("Topics and concepts found:")
                 for result in entity_results:
-                    if result['type'] and result['entities']:  # Only show non-empty categories
-                        entity_type = result['type']
-                        entities = result['entities'][:5]  # Limit to 5 examples
-                        overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
+                    entity_info = result['entity_info']
+                    if entity_info['type'] and entity_info['name']:
+                        entity_type = entity_info['type']
+                        name = entity_info['name']
+                        docs = entity_info['documents']
+                        overview.append(f"- {entity_type.title()}: {name}")
+                        if docs:
+                            overview.append(f"  Found in: {', '.join(docs)}")
                 overview.append("")
 
             return "\n".join(overview)
