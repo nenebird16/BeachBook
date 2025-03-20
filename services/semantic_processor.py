@@ -1,10 +1,10 @@
-
 import logging
 import nltk
-from nltk.tokenize import sent_tokenize
+from nltk.tokenize import sent_tokenize, word_tokenize
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import torch
+from typing import List, Dict, Any
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -118,12 +118,12 @@ class SemanticProcessor:
         """Extract entities using basic NLP techniques"""
         entities = []
         sentences = sent_tokenize(text)
-        
+
         for sentence in sentences:
-            words = sentence.split()
+            words = word_tokenize(sentence) #changed to word_tokenize for better accuracy
             for word in words:
                 # Basic named entity detection based on capitalization
-                if word[0].isupper() and len(word) > 1:
+                if word[0].isupper() and len(word) > 2: #increased word length to 2 to reduce noise
                     start = text.find(word)
                     if start != -1:
                         entities.append({
@@ -132,5 +132,5 @@ class SemanticProcessor:
                             "start": start,
                             "end": start + len(word)
                         })
-        
+
         return entities
