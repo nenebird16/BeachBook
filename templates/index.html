@@ -231,6 +231,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function submitQuery() {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
+        
+        // Clear input immediately
+        queryInput.value = '';
+        queryInput.style.height = 'auto';
 
         // Add user message to chat
         chatHistory.innerHTML += `
