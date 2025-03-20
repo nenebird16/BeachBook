@@ -199,20 +199,16 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             # Hybrid query combining semantic and graph structure
             entity_query = """
             MATCH (d:Document)
-            WHERE d.content IS NOT NULL
-            WITH d
-            MATCH (d)-[:CONTAINS]->(e:Entity)
-            WHERE any(keyword IN $keywords WHERE toLower(d.content) CONTAINS toLower(keyword))
-               OR toLower(e.name) IN [keyword IN $entities | toLower(keyword)]
-            WITH d, e.type as type, e.name as entity_name,
-                 count(DISTINCT d) as relevance
-            ORDER BY relevance DESC
-            WITH type, collect(DISTINCT entity_name) as entities,
-                 sum(relevance) as total_relevance
-            WHERE size(entities) > 0
-            RETURN type, entities, total_relevance
-            ORDER BY total_relevance DESC
-            LIMIT 10
+            WHERE d.content IS NOT NULL 
+            OPTIONAL MATCH (d)-[:CONTAINS]->(e:Entity)
+            WITH d, collect(e) as entities,
+                 any(keyword IN $keywords WHERE toLower(d.content) CONTAINS toLower(keyword)) as matches_content
+            WHERE matches_content OR 
+                  any(e IN entities WHERE any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword)))
+            RETURN d.title as title,
+                   d.content as content,
+                   [e IN entities | {name: e.name, type: e.type}] as entities
+            LIMIT 5
             """
             entity_results = self.graph.run(entity_query, 
                                           keywords=keywords, 
