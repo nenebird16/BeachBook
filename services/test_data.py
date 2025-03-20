@@ -7,7 +7,13 @@ logger = logging.getLogger(__name__)
 def setup_test_data():
     """Create test nodes and relationships for testing GraphRAG improvements"""
     try:
+        from services.graph_service import GraphService
+        from services.document_processor import DocumentProcessor
+        from services.semantic_processor import SemanticProcessor
+
         graph = GraphService()
+        semantic_processor = SemanticProcessor()
+        doc_processor = DocumentProcessor(graph, semantic_processor)
         
         # Sample documents
         docs = [
@@ -22,6 +28,19 @@ def setup_test_data():
                 'timestamp': '2025-03-20T00:00:00'
             }
         ]
+        
+        # Process each document
+        for doc in docs:
+            doc_node = graph.create_document_node(doc)
+            entities = doc_processor._extract_entities(doc['content'])
+            for entity in entities:
+                graph.create_entity_node(entity, doc_node)
+            
+            # Add embeddings
+            doc['embedding'] = semantic_processor.get_text_embedding(doc['content'])
+
+        logger.info("Test data setup complete")
+        return True
         
         # Create document nodes
         doc_nodes = []

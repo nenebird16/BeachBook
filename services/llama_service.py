@@ -207,7 +207,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             RETURN type, entities, relevance
             ORDER BY relevance DESC
             """
-            entity_results = self.graph.run(entity_query).data()
+            entity_results = self.graph.run(entity_query, keywords=keywords, entities=query_entities).data()
 
             # Enhanced hybrid retrieval combining semantic and graph structure
             doc_query = """
