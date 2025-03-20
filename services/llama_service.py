@@ -31,7 +31,7 @@ class LlamaService:
         """Initialize available LLM clients"""
         try:
             start_time = time.time()
-            
+
             # Try Anthropic first
             anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
             if anthropic_key:
@@ -230,7 +230,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             """
             keyword_matches = self.graph.run(keyword_query, 
                                            keywords=keywords).data()
-            
+
             # Enhanced entity-focused query
             entity_query = """
             // Match entities and their relationships
@@ -240,11 +240,11 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                 any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
                 OR exists((e)-[:RELATES_TO|DEVELOPS|FOCUSES_ON|CONTAINS]-())
             )
-            
+
             // Get connected documents and relationships
             OPTIONAL MATCH (d:Document)-[r]->(e)
             WHERE d.title IS NOT NULL
-            
+
             // Aggregate results with scoring
             WITH e,
                  collect(DISTINCT {
@@ -252,7 +252,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                    relationship: type(r)
                  }) as document_refs,
                  count(DISTINCT d) as doc_count
-            
+
             RETURN {
               name: e.name,
               type: e.type,
@@ -264,7 +264,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             """
             # Split query into keywords and remove punctuation
             keywords = [word.strip('?.,!') for word in query_text.lower().split()]
-            
+
             entity_results = self.graph.run(entity_query, 
                                           keywords=keywords,
                                           entities=query_entities).data()
@@ -279,8 +279,9 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             WITH d {.title, .content} as doc_info,
                  d.embedding as doc_embedding,
                  $embedding as query_embedding,
-                 count(distinct e) as entity_matches
-            WITH doc_info, doc_embedding, query_embedding, entity_matches,
+                 count(distinct e) as entity_matches,
+                 count(distinct r) as relationship_count
+            WITH doc_info, doc_embedding, query_embedding, entity_matches, relationship_count,
                  CASE 
                     WHEN doc_embedding IS NOT NULL
                     THEN reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
@@ -290,11 +291,13 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                          sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
                          norm + query_embedding[i] * query_embedding[i])))
                     ELSE 0.0
-                 END as semantic_score
-            WITH doc_info, entity_matches,
-                 semantic_score * 0.6 + 
+                 END as semantic_score,
+                 CASE WHEN relationship_count > 0 THEN relationship_count / 5.0 ELSE 0 END AS relationship_score
+            WITH doc_info, entity_matches, relationship_score,
+                 semantic_score * 0.5 + 
+                 relationship_score * 0.3 +
                  CASE WHEN entity_matches > 0 
-                 THEN 0.4 * (entity_matches/5.0) ELSE 0 END as combined_score
+                 THEN 0.2 * (entity_matches/5.0) ELSE 0 END as combined_score
             WHERE combined_score > 0.3
             RETURN doc_info, combined_score, entity_matches
             ORDER BY combined_score DESC

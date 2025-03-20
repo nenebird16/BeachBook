@@ -5,6 +5,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 import torch
 from typing import List, Dict, Any
+import spacy
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -14,12 +15,17 @@ nltk.download('punkt', quiet=True)
 
 class SemanticProcessor:
     def __init__(self):
-        """Initialize the semantic processor with sentence transformers"""
+        """Initialize the semantic processor with sentence transformers and spaCy"""
         self.logger = logging.getLogger(__name__)
         try:
             # Initialize sentence transformer model
             self.logger.info("Initializing sentence transformer model...")
             self.model = SentenceTransformer('all-MiniLM-L6-v2')
+            self.logger.info("Successfully initialized sentence transformer")
+            # Initialize spaCy NLP model
+            self.logger.info("Initializing spaCy NLP model...")
+            self.nlp = spacy.load("en_core_web_sm")
+            self.logger.info("Successfully initialized spaCy NLP model")
             self.logger.info("Successfully initialized semantic processing")
         except Exception as e:
             self.logger.error(f"Failed to initialize semantic processor: {str(e)}")
@@ -49,8 +55,7 @@ class SemanticProcessor:
                     "embedding": embedding
                 })
 
-            # Extract entities using basic NLP techniques
-            words = content.split()
+            # Extract entities using enhanced NLP techniques
             entities = self._extract_entities(content)
 
             return {
@@ -115,22 +120,17 @@ class SemanticProcessor:
             return [text]  # Return the full text as a single chunk if chunking fails
 
     def _extract_entities(self, text: str) -> list:
-        """Extract entities using basic NLP techniques"""
+        """Extract entities using enhanced NLP techniques"""
         entities = []
-        sentences = sent_tokenize(text)
+        doc = self.nlp(text)
 
-        for sentence in sentences:
-            words = word_tokenize(sentence) #changed to word_tokenize for better accuracy
-            for word in words:
-                # Basic named entity detection based on capitalization
-                if word[0].isupper() and len(word) > 2: #increased word length to 2 to reduce noise
-                    start = text.find(word)
-                    if start != -1:
-                        entities.append({
-                            "text": word,
-                            "label": "ENTITY",
-                            "start": start,
-                            "end": start + len(word)
-                        })
+        for ent in doc.ents:
+            entities.append({
+                "text": ent.text,
+                "label": ent.label_,
+                "start": ent.start_char,
+                "end": ent.end_char,
+                "context": text[max(0, ent.start_char-50):min(len(text), ent.end_char+50)]
+            })
 
         return entities
