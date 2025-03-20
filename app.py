@@ -1,6 +1,7 @@
 import os
 import logging
 import config
+import time
 from flask import Flask, request, render_template, jsonify
 from werkzeug.utils import secure_filename
 from storage.factory import StorageFactory
@@ -21,89 +22,67 @@ app.register_blueprint(journal_routes)
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
 
-def verify_environment():
-    """Verify required environment variables are present"""
-    required_vars = {
-        'NEO4J_URI': os.environ.get('NEO4J_URI'),
-        'NEO4J_USER': os.environ.get('NEO4J_USER'),
-        'NEO4J_PASSWORD': os.environ.get('NEO4J_PASSWORD'),
-    }
-
-    missing = [var for var, value in required_vars.items() if not value]
-    if missing:
-        logger.error(f"Missing required environment variables: {', '.join(missing)}")
-        return False
-
-    logger.info("All required environment variables are present")
-    return True
-
 def init_services():
-    """Initialize all required services"""
+    """Initialize all required services with timing metrics"""
     services = {}
+    start_time = time.time()
 
-    # Verify environment variables first
-    if not verify_environment():
-        logger.warning("Missing environment variables - services will be initialized in degraded state")
-
-    try:
-        # Initialize semantic processor
-        logger.info("Initializing semantic processor...")
-        semantic_processor = SemanticProcessor()
-        services['semantic_processor'] = semantic_processor
-        logger.info("Semantic processor initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize semantic processor: {str(e)}", exc_info=True)
+    logger.info("Starting service initialization...")
 
     try:
-        # Initialize graph service
-        logger.info("Initializing graph service...")
-        graph_service = GraphService()
-        services['graph_db'] = graph_service
-        logger.info("Graph service initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize graph service: {str(e)}", exc_info=True)
+        # Initialize LlamaService (core chat functionality)
+        service_start = time.time()
+        llama_service = LlamaService()
+        services['llama_service'] = llama_service
+        logger.info(f"LlamaService initialization took {time.time() - service_start:.2f} seconds")
 
-    try:
-        # Initialize document processor if dependencies are available
+        # Initialize semantic processor if LlamaService is healthy
+        if llama_service and llama_service.anthropic:
+            service_start = time.time()
+            semantic_processor = SemanticProcessor()
+            services['semantic_processor'] = semantic_processor
+            logger.info(f"SemanticProcessor initialization took {time.time() - service_start:.2f} seconds")
+        else:
+            logger.warning("Skipping SemanticProcessor initialization - LlamaService unavailable")
+
+        # Initialize graph service if environment variables are present
+        if all([os.environ.get(var) for var in ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD']]):
+            service_start = time.time()
+            graph_service = GraphService()
+            services['graph_db'] = graph_service
+            logger.info(f"GraphService initialization took {time.time() - service_start:.2f} seconds")
+        else:
+            logger.warning("Skipping GraphService initialization - credentials not configured")
+
+        # Initialize document processor only if dependencies are available
         if services.get('graph_db') and services.get('semantic_processor'):
-            logger.info("Initializing document processor...")
+            service_start = time.time()
             doc_processor = DocumentProcessor(
                 graph_service=services['graph_db'],
                 semantic_processor=services['semantic_processor']
             )
             services['document_processor'] = doc_processor
-            logger.info("Document processor initialized successfully")
+            logger.info(f"DocumentProcessor initialization took {time.time() - service_start:.2f} seconds")
         else:
-            logger.warning("Skipping document processor initialization - required services unavailable")
-    except Exception as e:
-        logger.error(f"Failed to initialize document processor: {str(e)}", exc_info=True)
+            logger.warning("Skipping DocumentProcessor initialization - required services unavailable")
 
-    try:
-        # Initialize LlamaService if dependencies are available
-        if services.get('semantic_processor'):
-            logger.info("Initializing LlamaService...")
-            llama_service = LlamaService()
-            services['llama_service'] = llama_service
-            logger.info("LlamaService initialized successfully")
-        else:
-            logger.warning("Skipping LlamaService initialization - required services unavailable")
     except Exception as e:
-        logger.error(f"Failed to initialize LlamaService: {str(e)}", exc_info=True)
+        logger.error(f"Error during service initialization: {str(e)}", exc_info=True)
+        # Continue with partial services rather than failing completely
 
+    total_time = time.time() - start_time
+    logger.info(f"Total service initialization time: {total_time:.2f} seconds")
     return services
 
 # Initialize services
-try:
-    services = init_services()
-    # Make services available to the app context
-    app.config['graph_db'] = services.get('graph_db')
-    app.config['semantic_processor'] = services.get('semantic_processor')
-    app.config['document_processor'] = services.get('document_processor')
-    app.config['llama_service'] = services.get('llama_service')
-except Exception as e:
-    logger.error(f"Application startup failed: {str(e)}", exc_info=True)
-    # Allow the app to start in a degraded state
-    services = {}
+services = init_services()
+
+# Make services available to the app context
+app.config['llama_service'] = services.get('llama_service')
+app.config['semantic_processor'] = services.get('semantic_processor')
+app.config['graph_db'] = services.get('graph_db')
+app.config['document_processor'] = services.get('document_processor')
+
 
 @app.route('/health')
 def health_check():
@@ -118,7 +97,7 @@ def health_check():
         }
 
         # Verify Neo4j environment variables
-        env_vars_present = verify_environment()
+        env_vars_present = all([os.environ.get(var) for var in ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD']])
 
         return jsonify({
             'status': 'healthy' if all(services_status.values()) and env_vars_present else 'degraded',
