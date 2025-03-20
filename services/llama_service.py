@@ -211,13 +211,17 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                  d.embedding as doc_embedding,
                  $embedding as query_embedding
             WITH d, cleaned_title, cleaned_content,
-                 reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
-                   dot + doc_embedding[i] * query_embedding[i]) /
-                 (sqrt(reduce(norm = 0.0, i IN range(0, size(doc_embedding)-1) | 
-                   norm + doc_embedding[i] * doc_embedding[i])) *
-                  sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
-                   norm + query_embedding[i] * query_embedding[i]))) as embedding_score
-            WHERE embedding_score > 0.3 OR cleaned_title CONTAINS $keyword OR cleaned_content CONTAINS $keyword
+                 CASE 
+                    WHEN doc_embedding IS NOT NULL
+                    THEN reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
+                         dot + doc_embedding[i] * query_embedding[i]) /
+                         (sqrt(reduce(norm = 0.0, i IN range(0, size(doc_embedding)-1) | 
+                         norm + doc_embedding[i] * doc_embedding[i])) *
+                         sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
+                         norm + query_embedding[i] * query_embedding[i])))
+                    ELSE 0.0
+                 END as embedding_score
+            WHERE doc_embedding IS NULL OR embedding_score > 0.3 OR cleaned_title CONTAINS $keyword OR cleaned_content CONTAINS $keyword
             RETURN d, embedding_score
             ORDER BY embedding_score DESC
             LIMIT 5
