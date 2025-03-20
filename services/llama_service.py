@@ -106,7 +106,7 @@ class LlamaService:
     def process_query(self, query_text: str) -> Dict[str, Any]:
         """Process a query and generate a response"""
         try:
-            if not self.anthropic:
+            if not (self._anthropic or self._openai):
                 return {
                     'response': "I apologize, but the knowledge service is currently unavailable. Please try again later.",
                     'technical_details': {
