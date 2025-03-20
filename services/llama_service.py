@@ -34,15 +34,6 @@ class LlamaService:
             self.query_templates = QueryTemplates()
             self.logger.debug("Query templates initialized")
 
-            # Verify spaCy model and vectors
-            if not hasattr(self.semantic_processor, 'nlp'):
-                self.logger.error("Semantic processor's spaCy model not initialized")
-                raise ValueError("Semantic processor's spaCy model not initialized")
-
-            if not self.semantic_processor.nlp.has_vector:
-                self.logger.error("Semantic processor's spaCy model has no word vectors")
-                raise ValueError("Semantic processor's spaCy model has no word vectors")
-
             # Test vector generation
             test_text = "volleyball skills"
             test_embedding = self.semantic_processor.get_text_embedding(test_text)
