@@ -198,14 +198,14 @@ Since I don't find any matches in the knowledge graph for this query, I should:
 
             # Hybrid query combining semantic, keyword, and graph structure
             entity_query = """
-            MATCH (e:Entity)
-            WHERE any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
-            OR e.name IN $entities
-            WITH e, e.type as type
-            WITH type, collect(distinct e.name) as entities,
-                 count(distinct e) as relevance
-            RETURN type, entities, relevance
-            ORDER BY relevance DESC
+            MATCH (d:Document)-[:CONTAINS]->(e:Entity)
+            WHERE d.content IS NOT NULL AND any(keyword IN $keywords WHERE toLower(d.content) CONTAINS keyword) OR e.name IN $entities
+            WITH e.type as type, 
+                 collect(DISTINCT e.name) as entities,
+                 count(DISTINCT d) as doc_count
+            WHERE doc_count > 0
+            RETURN type, entities, doc_count
+            ORDER BY doc_count DESC
             """
             entity_results = self.graph.run(entity_query, keywords=keywords, entities=query_entities).data()
 
