@@ -41,41 +41,54 @@ def init_services():
     """Initialize all required services"""
     services = {}
 
+    # Verify environment variables first
+    if not verify_environment():
+        logger.warning("Missing environment variables - services will be initialized in degraded state")
+
     try:
-        # Verify environment variables first
-        if not verify_environment():
-            raise ValueError("Required environment variables are missing")
-
-        # Initialize graph service
-        logger.info("Initializing graph service...")
-        graph_service = GraphService()
-        services['graph_db'] = graph_service
-        logger.info("Graph service initialized successfully")
-
         # Initialize semantic processor
         logger.info("Initializing semantic processor...")
         semantic_processor = SemanticProcessor()
         services['semantic_processor'] = semantic_processor
         logger.info("Semantic processor initialized successfully")
-
-        # Initialize document processor
-        logger.info("Initializing document processor...")
-        doc_processor = DocumentProcessor(
-            graph_service=graph_service,
-            semantic_processor=semantic_processor
-        )
-        services['document_processor'] = doc_processor
-        logger.info("Document processor initialized successfully")
-
-        # Initialize LlamaService
-        logger.info("Initializing LlamaService...")
-        llama_service = LlamaService()
-        services['llama_service'] = llama_service
-        logger.info("LlamaService initialized successfully")
-
     except Exception as e:
-        logger.error(f"Failed to initialize services: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Failed to initialize semantic processor: {str(e)}", exc_info=True)
+
+    try:
+        # Initialize graph service
+        logger.info("Initializing graph service...")
+        graph_service = GraphService()
+        services['graph_db'] = graph_service
+        logger.info("Graph service initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize graph service: {str(e)}", exc_info=True)
+
+    try:
+        # Initialize document processor if dependencies are available
+        if services.get('graph_db') and services.get('semantic_processor'):
+            logger.info("Initializing document processor...")
+            doc_processor = DocumentProcessor(
+                graph_service=services['graph_db'],
+                semantic_processor=services['semantic_processor']
+            )
+            services['document_processor'] = doc_processor
+            logger.info("Document processor initialized successfully")
+        else:
+            logger.warning("Skipping document processor initialization - required services unavailable")
+    except Exception as e:
+        logger.error(f"Failed to initialize document processor: {str(e)}", exc_info=True)
+
+    try:
+        # Initialize LlamaService if dependencies are available
+        if services.get('semantic_processor'):
+            logger.info("Initializing LlamaService...")
+            llama_service = LlamaService()
+            services['llama_service'] = llama_service
+            logger.info("LlamaService initialized successfully")
+        else:
+            logger.warning("Skipping LlamaService initialization - required services unavailable")
+    except Exception as e:
+        logger.error(f"Failed to initialize LlamaService: {str(e)}", exc_info=True)
 
     return services
 
@@ -121,7 +134,12 @@ def health_check():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    """Render the main page"""
+    try:
+        return render_template('index.html')
+    except Exception as e:
+        logger.error(f"Error rendering index page: {str(e)}")
+        return "Service temporarily unavailable", 503
 
 @app.route('/query', methods=['POST'])
 def query_knowledge():
@@ -140,24 +158,22 @@ def query_knowledge():
                 'response': 'Please provide a question to answer.'
             }), 400
 
-        # Process the query using LlamaService
+        # Check if LlamaService is available
         llama_service = app.config.get('llama_service')
         if not llama_service:
+            logger.error("LlamaService not initialized")
             return jsonify({
                 'error': 'Service unavailable',
-                'response': 'The knowledge service is currently unavailable. Please try again later.'
+                'response': 'The knowledge service is currently unavailable. Please try the health check endpoint (/health) to verify service status.'
             }), 503
 
         # Process the query
-        result = llama_service.process_query(query)
-
-        # Log the response structure for debugging
-        logger.debug("Query result structure:")
-        logger.debug(f"Response text: {result.get('response')}")
-        logger.debug(f"Technical details: {result.get('technical_details')}")
-
-        if not result:
-            logger.error("LlamaService returned None response")
+        try:
+            result = llama_service.process_query(query)
+            if not result:
+                raise ValueError("Empty response from LlamaService")
+        except Exception as e:
+            logger.error(f"Error processing query with LlamaService: {str(e)}", exc_info=True)
             return jsonify({
                 'error': 'Service error',
                 'response': 'Sorry, I encountered an error while processing your request. Please try again.'
@@ -171,16 +187,13 @@ def query_knowledge():
             }
         }
 
-        # Log the final response being sent to frontend
-        logger.debug(f"Sending response to frontend: {response}")
-
         return jsonify(response), 200
 
     except Exception as e:
-        logger.error(f"Error processing query with LlamaService: {str(e)}", exc_info=True)
+        logger.error(f"Unexpected error in query endpoint: {str(e)}", exc_info=True)
         return jsonify({
-            'error': 'Failed to process query',
-            'response': 'I encountered an error while processing your question. Please try again.'
+            'error': 'Internal server error',
+            'response': 'An unexpected error occurred. Please try again later.'
         }), 500
 
 @app.route('/upload', methods=['POST'])
