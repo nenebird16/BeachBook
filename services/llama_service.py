@@ -253,9 +253,12 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             ORDER BY entity_info.relevance DESC
             LIMIT 10
             """
+            # Split query into keywords and remove punctuation
+            keywords = [word.strip('?.,!') for word in query_text.lower().split()]
+            
             entity_results = self.graph.run(entity_query, 
-                                          keywords=keywords, 
-                                          entities=[e.lower() for e in query_entities]).data()
+                                          keywords=keywords,
+                                          entities=query_entities).data()
 
             # Enhanced hybrid retrieval combining semantic and graph structure
             doc_query = """
@@ -288,7 +291,10 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             ORDER BY combined_score DESC
             LIMIT 5
             """
-            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.get_text_embedding(query_text)).data()
+            doc_results = self.graph.run(doc_query, 
+                                       keywords=keywords,
+                                       entities=query_entities,
+                                       embedding=self._semantic_processor.get_text_embedding(query_text)).data()
 
 
             if not entity_results and not doc_results:
