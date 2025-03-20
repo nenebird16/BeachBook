@@ -158,7 +158,7 @@ class LlamaService:
 Context information:
 {context_info}
 
-Please provide a natural, conversational response using information from the provided context. Use concise numbered references to documents at the end of relevant statements (e.g. 'Anders Mol is a significant player[1]'). Focus on direct information and relationships found in the documents."""
+Please provide a natural, conversational response using information from the provided context. Use concise numbered references [1], [2], etc. for source attribution but do not mention document titles directly. Focus on facts and relationships found in the documents, adding the reference number at the end of each relevant statement."""
             else:
                 is_content_query = any(keyword in query.lower() for keyword in 
                     ['what', 'tell me about', 'show me', 'list', 'topics'])
