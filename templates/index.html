@@ -12,8 +12,13 @@
                 <div class="card-body d-flex flex-column">
                     <div id="chatHistory" class="flex-grow-1 mb-3"></div>
                     <div class="chat-input-container">
-                        <textarea class="form-control" id="queryText" rows="1" placeholder="Ask a question..."
-                            style="resize: none;"></textarea>
+                        <form id="queryForm" class="mb-0">
+                            <div class="input-group">
+                                <textarea class="form-control" id="queryText" rows="1" placeholder="Ask a question..."
+                                    style="resize: none;"></textarea>
+                                <button type="submit" class="btn btn-primary">Send</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -75,6 +80,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const cypherQueries = document.getElementById('cypherQueries');
     const auditTrail = document.getElementById('auditTrail');
     const queryInput = document.getElementById('queryText');
+    const queryForm = document.getElementById('queryForm');
     const uploadForm = document.getElementById('uploadForm');
     const progressBar = document.querySelector('#uploadProgress .progress-bar');
     const progressContainer = document.getElementById('uploadProgress');
@@ -199,33 +205,6 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
         }
 
-        // Add to audit trail
-        const timestamp = new Date().toLocaleTimeString();
-        const queryText = data.technical_details?.queries?.query_text || 'Unknown query';
-        auditTrail.innerHTML += `
-            <div class="audit-entry mb-2">
-                <small class="text-muted">${timestamp}</small>
-                <div>Query: "${queryText}"</div>
-                <div>Graph context retrieved successfully</div>
-            </div>
-        `;
-                <div class="cypher-query mb-3">
-                    <h6>Search Patterns:</h6>
-                    <pre><code>${JSON.stringify(queries.parameters.search_patterns, null, 2)}</code></pre>
-                </div>
-            `;
-        }
-
-        // Display query analysis
-        if (queries.query_analysis) {
-            queryContent += `
-                <div class="cypher-query">
-                    <h6>Query Analysis:</h6>
-                    <pre><code>${JSON.stringify(queries.query_analysis, null, 2)}</code></pre>
-                </div>
-            `;
-        }
-
         cypherQueries.innerHTML = queryContent || '<div class="alert alert-info">No queries generated.</div>';
     }
 
@@ -300,13 +279,17 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Handle form submission
+    queryForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitQuery();
+    });
+
     // Handle Enter key in textarea
     queryInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (this.value.trim()) {
-                submitQuery();
-            }
+            submitQuery();
         }
     });
 
@@ -415,6 +398,14 @@ document.addEventListener('DOMContentLoaded', function() {
 .cypher-query-container-wide {
     max-height: 500px;
     overflow-y: auto;
+}
+
+.input-group {
+    background-color: transparent;
+}
+
+.input-group .btn {
+    margin-left: 0.5rem;
 }
 
 /* Add these styles to your existing CSS */
