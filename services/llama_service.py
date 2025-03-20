@@ -203,15 +203,12 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             entity_results = self.graph.run(entity_query).data()
 
             # Enhanced hybrid retrieval combining semantic and graph structure
-            doc_query = f"""
-            MATCH (d:Document)-[r:CONTAINS]->(e:Entity)
-            WHERE d.content IS NOT NULL
-            WITH d, 
-                 toLower(d.title) as cleaned_title, 
-                 toLower(d.content) as cleaned_content,
+            doc_query = """
+            MATCH (d:Document)
+            WITH d {.title, .content} as doc_info,
                  d.embedding as doc_embedding,
                  $embedding as query_embedding
-            WITH d, cleaned_title, cleaned_content,
+            WITH doc_info, doc_embedding, query_embedding,
                  CASE 
                     WHEN doc_embedding IS NOT NULL
                     THEN reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
@@ -222,12 +219,12 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                          norm + query_embedding[i] * query_embedding[i])))
                     ELSE 0.0
                  END as embedding_score
-            WHERE embedding_score > 0.3 OR cleaned_title CONTAINS $keyword OR cleaned_content CONTAINS $keyword
-            RETURN d {.title, .content}, embedding_score
+            WHERE embedding_score > 0.3
+            RETURN doc_info, embedding_score
             ORDER BY embedding_score DESC
             LIMIT 5
             """
-            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.get_text_embedding(query_text), keyword=keyword).data()
+            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.get_text_embedding(query_text)).data()
 
 
             if not entity_results and not doc_results:
@@ -240,7 +237,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             if doc_results:
                 overview.append(f"Documents:")
                 for result in doc_results:
-                    overview.append(f"- {result['d']['title']}")
+                    overview.append(f"- {result['doc_info']['title']}")
                 overview.append("")
 
             # Add entity information
