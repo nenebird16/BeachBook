@@ -202,9 +202,9 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             """
             entity_results = self.graph.run(entity_query).data()
 
-            # Get document count and sample titles
+            # Enhanced hybrid retrieval combining semantic and graph structure
             doc_query = f"""
-            MATCH (d:Document)
+            MATCH (d:Document)-[r:CONTAINS]->(e:Entity)
             WHERE d.content IS NOT NULL
             WITH d, 
                  toLower(d.title) as cleaned_title, 
