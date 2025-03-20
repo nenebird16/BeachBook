@@ -25,7 +25,7 @@ class LlamaService:
         self.logger.info("Optional components will be initialized on first use")
 
     def _init_anthropic(self):
-        """Initialize the Anthropic client"""
+        """Initialize the Anthropic client and semantic processor"""
         try:
             start_time = time.time()
             api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -36,15 +36,18 @@ class LlamaService:
 
             try:
                 self._anthropic = Anthropic()
+                self._semantic_processor = SemanticProcessor()
                 init_time = time.time() - start_time
-                self.logger.info(f"Anthropic client initialized successfully in {init_time:.2f} seconds")
+                self.logger.info(f"Anthropic client and semantic processor initialized successfully in {init_time:.2f} seconds")
             except Exception as e:
-                self.logger.error(f"Failed to initialize Anthropic client: {str(e)}")
+                self.logger.error(f"Failed to initialize services: {str(e)}")
                 self._anthropic = None
+                self._semantic_processor = None
 
         except Exception as e:
-            self.logger.error(f"Error during Anthropic initialization: {str(e)}", exc_info=True)
+            self.logger.error(f"Error during service initialization: {str(e)}", exc_info=True)
             self._anthropic = None
+            self._semantic_processor = None
 
     @property
     def anthropic(self):
