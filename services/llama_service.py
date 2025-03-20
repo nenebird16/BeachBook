@@ -196,20 +196,18 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             query_entities = [ent.text.lower() for ent in doc.ents]
             keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
 
-            # Hybrid query combining semantic and graph structure
+            # Entity-focused query
             entity_query = """
-            MATCH (d:Document)
-            WHERE d.content IS NOT NULL
-            WITH d
-            OPTIONAL MATCH (d)-[:CONTAINS]->(e:Entity)
-            WHERE any(keyword IN $keywords WHERE toLower(d.content) CONTAINS toLower(keyword))
-               OR toLower(e.name) IN [keyword IN $entities | toLower(keyword)]
-            WITH d, collect(DISTINCT e) as entities,
-                 count(DISTINCT e) as relevance
+            MATCH (e:Entity)
+            WHERE any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
+            WITH e
+            OPTIONAL MATCH (d:Document)-[:CONTAINS]->(e)
+            WITH e, collect(DISTINCT d.title) as documents
+            RETURN e.name as name,
+                   e.type as type,
+                   documents,
+                   size(documents) as relevance
             ORDER BY relevance DESC
-            RETURN d.title as title,
-                   d.content as content,
-                   [e IN entities | {name: e.name, type: e.type}] as entities
             LIMIT 10
             """
             entity_results = self.graph.run(entity_query, 
