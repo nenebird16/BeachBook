@@ -1,113 +1,59 @@
 import os
-# Remove NEO4J_URI from environment before importing py2neo
-original_uri = os.environ.pop('NEO4J_URI', None)
-
 import logging
-from py2neo import Graph, ConnectionProfile
+from storage.neo4j_impl import Neo4jDatabase
 from urllib.parse import urlparse
-from llama_index.graph_stores.neo4j import Neo4jGraphStore
-from llama_index.core import Settings, Document, VectorStoreIndex, StorageContext
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-def test_connections():
+def test_neo4j_data():
+    """Test Neo4j database connection and inspect data"""
     try:
-        # Get credentials from environment (NEO4J_URI was already removed)
-        neo4j_user = os.environ.get("NEO4J_USER")
-        neo4j_password = os.environ.get("NEO4J_PASSWORD")
-        openai_key = os.environ.get("OPENAI_API_KEY")
+        # Initialize Neo4j database
+        db = Neo4jDatabase()
+        logger.info("Testing Neo4j connection and data...")
 
-        # Verify environment variables
-        logger.debug(f"NEO4J_USER present: {'Yes' if neo4j_user else 'No'}")
-        logger.debug(f"NEO4J_PASSWORD present: {'Yes' if neo4j_password else 'No'}")
-        logger.debug(f"OPENAI_API_KEY present: {'Yes' if openai_key else 'No'}")
+        # Try to connect
+        if db.connect():
+            logger.info("✓ Successfully connected to Neo4j")
 
-        if not all([original_uri, neo4j_user, neo4j_password]):
-            raise ValueError("Neo4j credentials not properly configured")
+            # Check all node labels
+            labels_query = """
+            CALL db.labels() YIELD label
+            RETURN collect(label) as labels
+            """
+            labels_result = db.query(labels_query)
+            logger.info(f"Available node labels: {labels_result[0]['labels'] if labels_result else []}")
 
-        # Parse URI for AuraDB connection
-        uri = urlparse(original_uri)
-        logger.debug(f"Original URI scheme: {uri.scheme}")
-        logger.debug(f"Original URI netloc: {uri.netloc}")
-
-        try:
-            # Create connection profile for AuraDB
-            if uri.scheme == 'neo4j+s':
-                profile = ConnectionProfile(
-                    scheme="bolt+s",
-                    host=uri.netloc,
-                    port=7687,  # Default AuraDB port
-                    secure=True,
-                    user=neo4j_user,
-                    password=neo4j_password
-                )
-                logger.info("Using AuraDB connection format")
-            else:
-                profile = ConnectionProfile(
-                    uri=original_uri,
-                    user=neo4j_user,
-                    password=neo4j_password
-                )
-                logger.info("Using standard Neo4j connection format")
-
-            logger.debug(f"Connection profile configured: {profile.scheme}://{profile.host}")
-
-            # Test direct Neo4j connection
-            logger.info("Testing direct Neo4j connection...")
-            try:
-                graph = Graph(profile=profile)
-                result = graph.run("RETURN 1 as test").data()
-                logger.info("✓ Direct Neo4j connection successful")
-                logger.debug(f"Test query result: {result}")
-
-            except Exception as e:
-                logger.error(f"Failed to connect to Neo4j: {str(e)}")
-                raise
-
-            # Test LlamaIndex connection
-            logger.info("Testing LlamaIndex connection...")
-            try:
-                Settings.llm_api_key = openai_key
-
-                # Configure LlamaIndex connection
-                if uri.scheme == 'neo4j+s':
-                    url = f"bolt+s://{uri.netloc}"
-                else:
-                    url = original_uri
-
-                logger.debug(f"LlamaIndex connection URI: {url}")
-                graph_store = Neo4jGraphStore(
-                    username=neo4j_user,
-                    password=neo4j_password,
-                    url=url,
-                    database="neo4j"
-                )
-
-                # Try to create a test document and index
-                storage_context = StorageContext.from_defaults(graph_store=graph_store)
-                test_doc = Document(text="Test document for connection verification")
-                index = VectorStoreIndex.from_documents(
-                    [test_doc],
-                    storage_context=storage_context
-                )
-                logger.info("✓ LlamaIndex connection and indexing successful")
-
-            except Exception as e:
-                logger.error(f"Failed to initialize LlamaIndex: {str(e)}")
-                raise
+            # Sample nodes for each label
+            node_samples_query = """
+            MATCH (n)
+            WITH labels(n) as labels, n
+            RETURN DISTINCT 
+                labels[0] as label,
+                n.name as name,
+                keys(n) as properties
+            LIMIT 5
+            """
+            samples = db.query(node_samples_query)
+            logger.info("Sample nodes:")
+            for sample in samples:
+                logger.info(f"Label: {sample['label']}")
+                logger.info(f"Name: {sample['name']}")
+                logger.info(f"Properties: {sample['properties']}")
+                logger.info("---")
 
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to connect to Neo4j: {str(e)}")
-            raise
+        else:
+            logger.error("Failed to connect to Neo4j")
+            return False
 
     except Exception as e:
-        logger.error(f"Connection test failed: {str(e)}")
+        logger.error(f"Test failed: {str(e)}")
         logger.error(f"Error type: {type(e)}")
         return False
 
 if __name__ == "__main__":
-    test_connections()
+    test_neo4j_data()

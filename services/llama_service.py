@@ -1,209 +1,279 @@
-from llama_index.core import Settings
-from llama_index.graph_stores.neo4j import Neo4jGraphStore
+import os
 import logging
+import time
+from typing import Dict, List, Any, Optional
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
-from urllib.parse import urlparse
-from py2neo import Graph, ConnectionProfile
 from anthropic import Anthropic
 from services.semantic_processor import SemanticProcessor
-from services.query_templates import QueryTemplates
-from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 class LlamaService:
     def __init__(self):
+        """Initialize the LlamaService with required components"""
         self.logger = logging.getLogger(__name__)
-        Settings.llm_api_key = None  # We won't be using LlamaIndex's LLM features
+        self._anthropic = None
+        self._graph = None
+        self._semantic_processor = None
 
-        # Initialize Anthropic client for Claude
-        self.anthropic = Anthropic()
+        # Initialize only the core Anthropic client
+        self._init_anthropic()
 
-        # Initialize semantic processor
-        self.semantic_processor = SemanticProcessor()
-        self.query_templates = QueryTemplates()
+        # Log initialization status
+        self.logger.info("LlamaService initialization complete. Status:")
+        self.logger.info(f"- Anthropic client: {'Available' if self._anthropic else 'Unavailable'}")
+        self.logger.info("Optional components will be initialized on first use")
 
+    def _init_anthropic(self):
+        """Initialize the Anthropic client and semantic processor"""
         try:
-            if not all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
-                raise ValueError("Neo4j credentials not properly configured")
+            start_time = time.time()
+            api_key = os.environ.get('ANTHROPIC_API_KEY')
 
-            # Parse URI for AuraDB
-            uri = urlparse(NEO4J_URI)
-            self.logger.debug(f"Original URI scheme: {uri.scheme}")
-            self.logger.debug(f"Original URI netloc: {uri.netloc}")
+            if not api_key:
+                self.logger.warning("ANTHROPIC_API_KEY not found in environment variables")
+                return
 
-            # Initialize direct Neo4j connection for queries
-            profile = ConnectionProfile(
-                scheme="bolt+s" if uri.scheme == 'neo4j+s' else uri.scheme,
-                host=uri.netloc,
-                port=7687,
-                secure=True if uri.scheme == 'neo4j+s' else False,
-                user=NEO4J_USER,
-                password=NEO4J_PASSWORD
-            )
-            self.graph = Graph(profile=profile)
-            self.logger.info("Successfully connected to Neo4j database")
-
-            # Initialize graph store
-            self.graph_store = Neo4jGraphStore(
-                username=NEO4J_USER,
-                password=NEO4J_PASSWORD,
-                url=f"bolt+s://{uri.netloc}" if uri.scheme == 'neo4j+s' else NEO4J_URI,
-                database="neo4j"
-            )
-            self.logger.info("Successfully initialized Neo4j graph store")
+            try:
+                self._anthropic = Anthropic()
+                self._semantic_processor = SemanticProcessor()
+                init_time = time.time() - start_time
+                self.logger.info(f"Anthropic client and semantic processor initialized successfully in {init_time:.2f} seconds")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize services: {str(e)}")
+                self._anthropic = None
+                self._semantic_processor = None
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize Neo4j connections: {str(e)}")
-            raise
+            self.logger.error(f"Error during service initialization: {str(e)}", exc_info=True)
+            self._anthropic = None
+            self._semantic_processor = None
 
-    def process_document(self, content: str) -> bool:
-        """Process document content for storage"""
+    @property
+    def anthropic(self):
+        """Lazy-loaded Anthropic client"""
+        return self._anthropic
+
+    @property
+    def graph(self):
+        """Lazy-loaded Neo4j graph connection"""
+        if self._graph is None:
+            try:
+                if all([NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD]):
+                    start_time = time.time()
+                    from py2neo import Graph, ConnectionProfile
+                    from urllib.parse import urlparse
+
+                    uri = urlparse(NEO4J_URI)
+                    bolt_uri = f"bolt+s://{uri.netloc}" if uri.scheme == 'neo4j+s' else f"bolt://{uri.netloc}"
+
+                    profile = ConnectionProfile(
+                        uri=bolt_uri,
+                        user=NEO4J_USER,
+                        password=NEO4J_PASSWORD
+                    )
+                    self._graph = Graph(profile=profile)
+                    self._graph.run("RETURN 1 as test").data()
+                    init_time = time.time() - start_time
+                    self.logger.info(f"Neo4j connection established in {init_time:.2f} seconds")
+                else:
+                    self.logger.warning("Neo4j credentials not configured - graph features will be unavailable")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize Neo4j connection: {str(e)}")
+                self._graph = None
+        return self._graph
+
+    def process_query(self, query_text: str) -> Dict[str, Any]:
+        """Process a query and generate a response"""
         try:
-            self.logger.info("Processing document for storage")
+            if not self.anthropic:
+                return {
+                    'response': "I apologize, but the knowledge service is currently unavailable. Please try again later.",
+                    'technical_details': {
+                        'queries': {}
+                    }
+                }
 
-            # Process document with semantic processor
-            semantic_data = self.semantic_processor.process_document(content)
+            self.logger.info(f"Processing query: {query_text}")
 
-            # Store embeddings in Neo4j if available
-            if semantic_data and 'embeddings' in semantic_data:
-                for chunk in semantic_data['embeddings']:
-                    try:
-                        # We'll match on a substring of the content to avoid length issues
-                        content_preview = chunk['text'][:200] if len(chunk['text']) > 200 else chunk['text']
-                        query = """
-                        MATCH (d:Document)
-                        WHERE d.content CONTAINS $content_preview
-                        SET d.embedding = $embedding
-                        """
-                        self.graph.run(query, 
-                                     content_preview=content_preview,
-                                     embedding=chunk['embedding'])
-                    except Exception as e:
-                        self.logger.error(f"Error storing embedding: {str(e)}")
-                        continue
+            # Get graph context if available (lazy-loaded)
+            graph_results = self._get_graph_overview(query_text) if self.graph else None
 
-            return True
+            # Generate response using Claude
+            response = self.generate_response(query_text, graph_results)
+
+            return {
+                'response': response,
+                'technical_details': {
+                    'queries': {
+                        'graph_context': graph_results
+                    }
+                }
+            }
 
         except Exception as e:
-            self.logger.error(f"Error processing document: {str(e)}")
-            raise
+            self.logger.error(f"Error processing query: {str(e)}", exc_info=True)
+            return {
+                'response': "I encountered an error while processing your request. Please try again.",
+                'technical_details': {
+                    'queries': {}
+                }
+            }
 
-    def generate_response(self, query: str, context_info: str = None) -> str:
+    def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
         """Generate a natural language response using Claude"""
         try:
+            if not self.anthropic:
+                return "The knowledge service is currently unavailable. Please try again later."
+
+            self.logger.debug("Starting response generation")
+            self.logger.debug(f"Query: {query}")
+            self.logger.debug(f"Context available: {'Yes' if context_info else 'No'}")
+
+            # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
+            model = "claude-3-5-sonnet-20241022"
+
+            system_message = "I am a knowledge graph assistant that only provides information from the connected graph database. I stay focused on available content and politely decline general conversation."
+
             if context_info:
-                prompt = f"""Based on the following context from a knowledge graph, help me answer this query: "{query}"
+                user_message = f"""Based on the following context from a knowledge graph, help me answer this query: "{query}"
 
-                Context information:
-                {context_info}
+Context information:
+{context_info}
 
-                Please provide a natural, conversational response that:
-                1. Directly answers the query using the context provided
-                2. Incorporates relevant information from the context
-                3. Highlights key relationships between concepts
-                4. Suggests related areas to explore if relevant
-
-                Response:"""
+Please provide a natural, conversational response that:
+1. Directly answers the query using the context provided
+2. Incorporates relevant information from the context
+3. Highlights key relationships between concepts
+4. Suggests related areas to explore if relevant"""
             else:
-                # Check if this is a query about graph contents
-                is_content_query = any(keyword in query.lower() 
-                                    for keyword in ['what', 'tell me about', 'show me', 'list', 'topics'])
+                is_content_query = any(keyword in query.lower() for keyword in 
+                    ['what', 'tell me about', 'show me', 'list', 'topics'])
 
                 if is_content_query:
-                    # Get graph overview
-                    overview = self._get_graph_overview()
-                    if overview:
-                        prompt = f"""As a knowledge graph assistant, I need to respond to this query: "{query}"
-
-                        Here's what I found in the knowledge graph:
-                        {overview}
-
-                        Please provide a helpful response that:
-                        1. Summarizes the types of information available
-                        2. Lists some key topics or entities found
-                        3. Encourages exploring specific areas of interest
-                        4. Maintains a focus on actual graph contents
-
-                        Response:"""
-                    else:
-                        prompt = """The knowledge graph appears to be empty at the moment. Please explain that:
-                        1. No documents or entities have been added yet
-                        2. Documents need to be uploaded first
-                        3. Keep the response brief and clear
-                        """
+                    user_message = ("I apologize, but I don't have access to any knowledge graph data at the moment. "
+                                  "Please try uploading some documents first or ask a different question.")
                 else:
-                    prompt = f"""As a knowledge graph assistant, I need to respond to this query: "{query}"
+                    user_message = f"""I need to respond to this query: "{query}"
 
-                    Since I don't find any matches in the knowledge graph for this query, I should:
-                    1. Politely explain that I can only provide information that exists in the knowledge graph
-                    2. Suggest that the user ask about specific topics or documents that might be in the knowledge graph
-                    3. Avoid engaging in general conversation or discussing topics not present in the graph
-                    4. Keep the response brief and focused
+Since I don't find any matches in the knowledge graph for this query, I should:
+1. Politely explain that I can only provide information that exists in the knowledge graph
+2. Suggest that the user ask about specific topics or documents
+3. Keep the response brief and focused"""
 
-                    Response:"""
+            try:
+                self.logger.debug("Sending request to Anthropic")
+                response = self.anthropic.messages.create(
+                    model=model,
+                    max_tokens=1000,
+                    temperature=0.7,
+                    messages=[
+                        {"role": "assistant", "content": system_message},
+                        {"role": "user", "content": user_message}
+                    ]
+                )
+                self.logger.debug("Successfully received response from Anthropic")
+                return response.content[0].text
 
-            response = self.anthropic.messages.create(
-                model="claude-3-opus-20240229",
-                max_tokens=1000,
-                temperature=0.7,
-                messages=[
-                    {
-                        "role": "assistant",
-                        "content": "I am a knowledge graph assistant that only provides information from the connected graph database. I stay focused on available content and politely decline general conversation."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            )
-
-            return response.content[0].text
+            except Exception as e:
+                self.logger.error(f"Error calling Anthropic API: {str(e)}", exc_info=True)
+                self.logger.error(f"Exception type: {type(e)}")
+                self.logger.error(f"Exception args: {e.args}")
+                raise
 
         except Exception as e:
-            self.logger.error(f"Error generating Claude response: {str(e)}")
-            return None
+            self.logger.error(f"Error generating response: {str(e)}", exc_info=True)
+            return "I apologize, but I encountered an error while generating a response. Please try again."
 
-    def _get_graph_overview(self) -> str:
-        """Get an overview of entities and topics in the graph"""
+    def _get_graph_overview(self, query_text: str) -> Optional[str]:
+        """Enhanced graph overview with hybrid retrieval"""
         try:
-            # Get all entity types and their instances
+            if not self.graph:
+                return None
+
+            # Extract query entities and keywords
+            doc = self._semantic_processor.nlp(query_text)
+            query_entities = [ent.text.lower() for ent in doc.ents]
+            keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
+
+            # Enhanced entity-focused query
             entity_query = """
+            // Match entities based on name matches
             MATCH (e:Entity)
-            WITH e.type as type, collect(distinct e.name) as entities
-            RETURN type, entities
-            ORDER BY size(entities) DESC
+            WHERE e.name IS NOT NULL
+            AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
+            
+            // Get connected documents and relationships
+            OPTIONAL MATCH (d:Document)-[r:CONTAINS]->(e)
+            WHERE d.title IS NOT NULL
+            
+            // Aggregate results with scoring
+            WITH e,
+                 collect(DISTINCT {
+                   title: d.title,
+                   relationship: type(r)
+                 }) as document_refs,
+                 count(DISTINCT d) as doc_count
+            
+            RETURN {
+              name: e.name,
+              type: e.type,
+              documents: [doc in document_refs | doc.title],
+              relevance: doc_count
+            } as entity_info
+            ORDER BY entity_info.relevance DESC
+            LIMIT 10
             """
-            entity_results = self.graph.run(entity_query).data()
+            entity_results = self.graph.run(entity_query, 
+                                          keywords=keywords, 
+                                          entities=[e.lower() for e in query_entities]).data()
 
-            # Get all visual elements
-            visual_query = """
-            MATCH (v:VisualElement)
-            RETURN collect(distinct v.name) as visual_elements
-            """
-            visual_results = self.graph.run(visual_query).data()
-
-            # Get document count and sample titles
+            # Enhanced hybrid retrieval combining semantic and graph structure
             doc_query = """
-            MATCH (d:Document)
-            RETURN count(d) as doc_count,
-                   collect(distinct d.title)[..5] as sample_titles
+            MATCH (d:Document)-[r:CONTAINS]->(e:Entity)
+            WHERE any(keyword IN $keywords WHERE 
+                  toLower(d.title) CONTAINS keyword OR
+                  toLower(d.content) CONTAINS keyword)
+            OR e.name IN $entities
+            WITH d {.title, .content} as doc_info,
+                 d.embedding as doc_embedding,
+                 $embedding as query_embedding,
+                 count(distinct e) as entity_matches
+            WITH doc_info, doc_embedding, query_embedding, entity_matches,
+                 CASE 
+                    WHEN doc_embedding IS NOT NULL
+                    THEN reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
+                         dot + doc_embedding[i] * query_embedding[i]) /
+                         (sqrt(reduce(norm = 0.0, i IN range(0, size(doc_embedding)-1) | 
+                         norm + doc_embedding[i] * doc_embedding[i])) *
+                         sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
+                         norm + query_embedding[i] * query_embedding[i])))
+                    ELSE 0.0
+                 END as semantic_score
+            WITH doc_info, entity_matches,
+                 semantic_score * 0.6 + 
+                 CASE WHEN entity_matches > 0 
+                 THEN 0.4 * (entity_matches/5.0) ELSE 0 END as combined_score
+            WHERE combined_score > 0.3
+            RETURN doc_info, combined_score, entity_matches
+            ORDER BY combined_score DESC
+            LIMIT 5
             """
-            doc_results = self.graph.run(doc_query).data()
+            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.get_text_embedding(query_text)).data()
 
-            if not entity_results and not doc_results[0]['doc_count'] and not visual_results:
+
+            if not entity_results and not doc_results:
                 return None
 
             # Format overview
             overview = []
 
             # Add document information
-            if doc_results[0]['doc_count']:
-                overview.append(f"Documents: {doc_results[0]['doc_count']} total")
-                if doc_results[0]['sample_titles']:
-                    overview.append("Sample documents:")
-                    for title in doc_results[0]['sample_titles']:
-                        overview.append(f"- {title}")
-                    overview.append("")
+            if doc_results:
+                overview.append(f"Documents:")
+                for result in doc_results:
+                    overview.append(f"- {result['doc_info']['title']}")
+                overview.append("")
 
             # Add entity information
             if entity_results:
@@ -215,133 +285,8 @@ class LlamaService:
                         overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
                 overview.append("")
 
-            # Add visual elements
-            if visual_results and visual_results[0]['visual_elements']:
-                overview.append("Visual elements and concepts:")
-                visual_elements = visual_results[0]['visual_elements'][:5]  # Limit to 5 examples
-                overview.append(f"- {', '.join(visual_elements)}")
-
             return "\n".join(overview)
 
         except Exception as e:
             self.logger.error(f"Error getting graph overview: {str(e)}")
             return None
-
-    def process_query(self, query_text: str) -> Dict:
-        """Process a query using hybrid search"""
-        try:
-            self.logger.info(f"Processing query: {query_text}")
-
-            # Analyze query semantically
-            query_analysis = self.semantic_processor.analyze_query(query_text)
-            query_embedding = query_analysis['embedding']
-
-            # Vector similarity search
-            vector_query = """
-            CALL db.index.vector.queryNodes(
-                'document_embeddings',
-                5,
-                $embedding
-            ) YIELD node, score
-            WITH node, score
-            MATCH (node)-[:CONTAINS]->(e:Entity)
-            RETURN node.content as content,
-                   node.title as title,
-                   collect(distinct e.name) as entities,
-                   score as relevance
-            ORDER BY relevance DESC
-            """
-            vector_results = self.graph.run(vector_query, 
-                                          embedding=query_embedding).data()
-            self.logger.debug(f"Vector query results: {vector_results}")
-
-            # Content-based search as backup
-            content_query = """
-            MATCH (d:Document)
-            WHERE toLower(d.content) CONTAINS toLower($query)
-            MATCH (d)-[r:CONTAINS]->(e:Entity)
-            RETURN d.content as content, 
-                   d.title as title,
-                   collect(distinct e.name) as entities,
-                   count(e) as relevance
-            ORDER BY relevance DESC
-            LIMIT 5
-            """
-            content_results = self.graph.run(content_query, 
-                                           query=query_text).data()
-            self.logger.debug(f"Content query results: {content_results}")
-
-            # Entity-based expansion
-            entity_query = """
-            MATCH (e:Entity)
-            WHERE toLower(e.name) CONTAINS toLower($query)
-            WITH e
-            MATCH (d:Document)-[:CONTAINS]->(e)
-            RETURN d.content as content,
-                   d.title as title,
-                   collect(distinct e.name) as entities
-            LIMIT 5
-            """
-            entity_results = self.graph.run(entity_query, 
-                                          query=query_text).data()
-            self.logger.debug(f"Entity query results: {entity_results}")
-
-            # Combine and deduplicate results
-            all_results = vector_results + content_results + entity_results
-            seen_titles = set()
-            unique_results = []
-            for result in all_results:
-                if result['title'] not in seen_titles:
-                    seen_titles.add(result['title'])
-                    unique_results.append(result)
-
-            # Prepare context for AI response
-            context_info = None
-            if unique_results:
-                context_sections = []
-                for result in unique_results[:5]:  # Top 5 unique results
-                    context_sections.append(f"Document: {result['title']}")
-                    context_sections.append(f"Content: {result['content'][:500]}")
-                    if result.get('entities'):
-                        context_sections.append(
-                            f"Related concepts: {', '.join(result['entities'])}")
-                    context_sections.append("")
-                context_info = "\n".join(context_sections)
-
-            # Generate AI response
-            ai_response = self.generate_response(query_text, context_info)
-
-            return {
-                'chat_response': ai_response,
-                'queries': {
-                    'vector_query': vector_query,
-                    'content_query': content_query,
-                    'entity_query': entity_query,
-                    'query_analysis': query_analysis
-                },
-                'results': context_info if context_info else "No matches found in knowledge graph"
-            }
-
-        except Exception as e:
-            self.logger.error(f"Error processing query: {str(e)}")
-            self.logger.error(f"Query text was: {query_text}")
-            raise
-
-    def get_available_queries(self) -> Dict:
-        """Get information about available query templates"""
-        return self.query_templates.list_available_queries()
-
-    def execute_template_query(self, category: str, query_name: str, params: Dict = None) -> list:
-        """Execute a template query with parameters"""
-        try:
-            query = self.query_templates.get_query(category, query_name)
-            if not query:
-                raise ValueError(f"Query template not found: {category}/{query_name}")
-
-            params = params or {}
-            results = self.graph.run(query, **params).data()
-            return results
-
-        except Exception as e:
-            self.logger.error(f"Error executing template query: {str(e)}")
-            raise

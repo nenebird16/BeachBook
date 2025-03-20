@@ -1,11 +1,17 @@
 import os
+# Store original URI
+original_uri = os.environ.get('NEO4J_URI')
 # Remove NEO4J_URI from environment before importing py2neo
-original_uri = os.environ.pop('NEO4J_URI', None)
+os.environ.pop('NEO4J_URI', None)
 
 from py2neo import Graph, Node, Relationship, ConnectionProfile
 import logging
 from urllib.parse import urlparse
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+
+# Restore original URI after py2neo import
+if original_uri:
+    os.environ['NEO4J_URI'] = original_uri
 
 class GraphService:
     def __init__(self):

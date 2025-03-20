@@ -109,7 +109,7 @@
 }
 
 /* Audit trail */
-.audit-trail-container {
+.resources-container {
     height: 500px;
     overflow-y: auto;
     padding: 1rem;
@@ -119,12 +119,33 @@
     scroll-behavior: smooth;
 }
 
-.audit-entry {
-    padding: 0.5rem;
+.resource-entry {
+    padding: 1rem;
     border-radius: 4px;
     background-color: rgba(var(--bs-secondary-rgb), 0.1);
     opacity: 0;
     animation: fadeIn 0.3s ease-in forwards;
+}
+
+.resource-header {
+    border-bottom: 1px solid rgba(var(--bs-border-color-rgb), 0.2);
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.query-text {
+    font-weight: 500;
+    margin: 0.5rem 0;
+}
+
+.referenced-docs ul, .semantic-focus ul {
+    margin: 0.5rem 0;
+    padding-left: 1rem;
+}
+
+.referenced-docs li {
+    color: var(--bs-light);
+    margin: 0.25rem 0;
 }
 
 .audit-entry.error {
