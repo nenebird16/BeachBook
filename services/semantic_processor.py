@@ -1,9 +1,10 @@
 
 import logging
-import spacy
 import nltk
 from nltk.tokenize import sent_tokenize
 import numpy as np
+from transformers import AutoTokenizer, AutoModel
+import torch
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -13,29 +14,26 @@ nltk.download('punkt', quiet=True)
 
 class SemanticProcessor:
     def __init__(self):
-        """Initialize the semantic processor with spaCy model"""
+        """Initialize the semantic processor with transformer models"""
         self.logger = logging.getLogger(__name__)
         try:
-            # Initialize spaCy model
-            self.logger.info("Initializing spaCy model...")
-            try:
-                self.nlp = spacy.load("en_core_web_md")
-            except OSError:
-                self.logger.warning("SpaCy model not found, downloading now...")
-                spacy.cli.download("en_core_web_md")
-                self.nlp = spacy.load("en_core_web_md")
-            
+            # Initialize transformer models
+            self.logger.info("Initializing transformer models...")
+            self.tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
+            self.model = AutoModel.from_pretrained('distilbert-base-uncased')
             self.logger.info("Successfully initialized semantic processing")
-
         except Exception as e:
             self.logger.error(f"Failed to initialize semantic processor: {str(e)}")
             raise
 
     def get_text_embedding(self, text: str) -> list:
-        """Get text embedding using spaCy"""
+        """Get text embedding using transformers"""
         try:
-            doc = self.nlp(text)
-            return doc.vector.tolist()
+            inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            embeddings = outputs.last_hidden_state.mean(dim=1)
+            return embeddings[0].numpy().tolist()
         except Exception as e:
             self.logger.error(f"Error generating text embedding: {str(e)}")
             raise
@@ -45,28 +43,32 @@ class SemanticProcessor:
         try:
             # Create document chunks
             chunks = self._create_chunks(content)
-
-            # Extract entities and relationships
-            doc = self.nlp(content)
+            
+            # Process with transformers
+            inputs = self.tokenizer(content, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            
+            # Extract entities (using basic token analysis)
+            tokens = self.tokenizer.tokenize(content)
             entities = []
-            relationships = []
-
-            for ent in doc.ents:
-                entities.append({
-                    "text": ent.text,
-                    "label": ent.label_,
-                    "start": ent.start_char,
-                    "end": ent.end_char
-                })
-
-            # Extract basic relationships between entities
-            for token in doc:
-                if token.dep_ in ['nsubj', 'dobj', 'pobj']:
-                    relationships.append({
-                        "subject": token.head.text,
-                        "predicate": token.dep_,
-                        "object": token.text
-                    })
+            current_entity = []
+            
+            for token in tokens:
+                if token.startswith('##'):
+                    if current_entity:
+                        current_entity.append(token[2:])
+                else:
+                    if current_entity:
+                        entities.append({
+                            "text": ''.join(current_entity),
+                            "label": "ENTITY",
+                            "start": len(''.join(tokens[:tokens.index(current_entity[0])])),
+                            "end": len(''.join(tokens[:tokens.index(token)]))
+                        })
+                        current_entity = []
+                    if token[0].isupper():
+                        current_entity.append(token)
 
             # Generate embeddings for chunks
             embeddings = []
@@ -79,7 +81,6 @@ class SemanticProcessor:
 
             return {
                 "entities": entities,
-                "relationships": relationships,
                 "chunks": chunks,
                 "embeddings": embeddings
             }
@@ -97,25 +98,14 @@ class SemanticProcessor:
             query_embedding = self.get_text_embedding(query)
             self.logger.debug("Generated query embedding successfully")
 
-            # Extract query entities and intent
-            doc = self.nlp(query)
-            query_entities = [{'text': ent.text, 'label': ent.label_}
-                            for ent in doc.ents]
-            self.logger.debug(f"Extracted entities: {query_entities}")
-
-            # Identify main focus of query
-            root = next(token for token in doc if token.head == token)
-            focus = {
-                'root_verb': root.text if root.pos_ == 'VERB' else None,
-                'main_noun': next((token.text for token in doc
-                                 if token.pos_ == 'NOUN'), None)
-            }
-            self.logger.debug(f"Query focus: {focus}")
+            # Extract query tokens
+            tokens = self.tokenizer.tokenize(query)
+            query_entities = [{'text': token, 'label': 'TOKEN'} 
+                            for token in tokens if not token.startswith('##')]
 
             result = {
                 'embedding': query_embedding,
-                'entities': query_entities,
-                'focus': focus
+                'entities': query_entities
             }
             self.logger.debug("Query analysis completed successfully")
             return result
