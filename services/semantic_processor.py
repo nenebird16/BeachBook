@@ -1,9 +1,8 @@
 import logging
-from typing import List, Dict, Optional
 import spacy
 import nltk
 from nltk.tokenize import sent_tokenize
-from sentence_transformers import SentenceTransformer
+import numpy as np
 
 # Download required NLTK data
 nltk.download('punkt', quiet=True)
@@ -15,85 +14,33 @@ class SemanticProcessor:
             # Initialize spaCy model
             self.logger.info("Initializing spaCy model...")
             try:
-                self.nlp = spacy.load("en_core_web_sm")
-                self.logger.info("Successfully loaded spaCy model")
+                # Use en_core_web_md for word vectors
+                self.nlp = spacy.load("en_core_web_md")
+                self.logger.info("Successfully loaded spaCy model with word vectors")
             except OSError:
                 self.logger.info("Downloading spaCy model...")
-                spacy.cli.download("en_core_web_sm")
-                self.nlp = spacy.load("en_core_web_sm")
+                spacy.cli.download("en_core_web_md")
+                self.nlp = spacy.load("en_core_web_md")
 
-            # Initialize sentence transformer for embeddings
-            self.logger.info("Initializing SentenceTransformer model...")
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
-            if not hasattr(self.model, 'encode'):
-                raise ValueError("SentenceTransformer model not properly initialized")
-            # Test encoding to verify model
-            test_encoding = self.model.encode("Test sentence")
-            if test_encoding is None or len(test_encoding) == 0:
-                raise ValueError("SentenceTransformer model failed to generate embeddings")
-            self.logger.info("Successfully loaded and verified SentenceTransformer model")
+            # Test word vectors
+            test_doc = self.nlp("test sentence")
+            if not test_doc.has_vector:
+                raise ValueError("SpaCy model does not have word vectors")
 
-            # Initialize domain patterns
-            self.domain_patterns = {
-                "Skill": [
-                    "passing", "setting", "hitting", "attacking", "blocking", "serving", 
-                    "defense", "digging", "jump serve", "float serve", "cut shot"
-                ],
-                "Drill": [
-                    "pepper", "queen of the court", "mini-game", "scrimmage",
-                    "target practice", "serve receive", "block touch"
-                ],
-                "VisualElement": [
-                    "ball tracking", "peripheral vision", "trajectory prediction",
-                    "depth perception", "pattern recognition", "visual focus"
-                ]
-            }
+            self.logger.info("Successfully initialized semantic processing")
 
-            self.logger.info("Initialized semantic processing models successfully")
         except Exception as e:
             self.logger.error(f"Failed to initialize semantic processor: {str(e)}")
             raise
 
-    def extract_entities_from_query(self, query: str) -> List[Dict[str, str]]:
-        """Extract entities from a search query"""
-        try:
-            entities = []
-            doc = self.nlp(query)
+    def get_text_embedding(self, text: str) -> list:
+        """Get text embedding using spaCy's word vectors"""
+        doc = self.nlp(text)
+        if doc.has_vector:
+            return doc.vector.tolist()
+        return [0.0] * 300  # Default dimension for spaCy vectors
 
-            # Extract named entities
-            for ent in doc.ents:
-                entities.append({
-                    'text': ent.text,
-                    'label': ent.label_,
-                    'type': 'named_entity'
-                })
-
-            # Look for domain-specific keywords
-            domain_keywords = {
-                'player': ['player', 'athlete', 'professional'],
-                'skill': ['serve', 'block', 'spike', 'dig', 'set'],
-                'technique': ['approach', 'footwork', 'positioning'],
-                'drill': ['drill', 'exercise', 'practice', 'training']
-            }
-
-            query_lower = query.lower()
-            for category, keywords in domain_keywords.items():
-                for keyword in keywords:
-                    if keyword in query_lower:
-                        entities.append({
-                            'text': keyword,
-                            'label': category.upper(),
-                            'type': 'domain_keyword'
-                        })
-
-            self.logger.debug(f"Extracted entities from query: {entities}")
-            return entities
-
-        except Exception as e:
-            self.logger.error(f"Error extracting entities from query: {str(e)}")
-            return []  # Return empty list on error, let calling code handle this gracefully
-
-    def process_document(self, content: str) -> Dict:
+    def process_document(self, content: str) -> dict:
         """Extract semantic information from document"""
         try:
             # Create document chunks
@@ -124,10 +71,10 @@ class SemanticProcessor:
             # Generate embeddings for chunks
             embeddings = []
             for chunk in chunks:
-                embedding = self.model.encode(chunk)
+                embedding = self.get_text_embedding(chunk)
                 embeddings.append({
                     "text": chunk,
-                    "embedding": embedding.tolist()
+                    "embedding": embedding
                 })
 
             return {
@@ -141,13 +88,13 @@ class SemanticProcessor:
             self.logger.error(f"Error processing document: {str(e)}")
             raise
 
-    def analyze_query(self, query: str) -> Dict:
+    def analyze_query(self, query: str) -> dict:
         """Analyze query for semantic search"""
         try:
             self.logger.debug(f"Analyzing query: {query}")
 
             # Generate query embedding
-            query_embedding = self.model.encode(query)
+            query_embedding = self.get_text_embedding(query)
             self.logger.debug("Generated query embedding successfully")
 
             # Extract query entities and intent
@@ -166,7 +113,7 @@ class SemanticProcessor:
             self.logger.debug(f"Query focus: {focus}")
 
             result = {
-                'embedding': query_embedding.tolist(),
+                'embedding': query_embedding,
                 'entities': query_entities,
                 'focus': focus
             }
@@ -177,7 +124,7 @@ class SemanticProcessor:
             self.logger.error(f"Error analyzing query: {str(e)}")
             raise
 
-    def _create_chunks(self, text: str, chunk_size: int = 512) -> List[str]:
+    def _create_chunks(self, text: str, chunk_size: int = 512) -> list:
         """Split text into semantic chunks"""
         try:
             # First split into sentences
