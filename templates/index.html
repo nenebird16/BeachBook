@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Display bot response
             chatHistory.innerHTML += `
                 <div class="chat-message bot-message mb-2">
-                    <strong>Bot:</strong> ${data.response}
+                    <strong>Assistant:</strong> ${data.response}
                 </div>
             `;
             scrollToBottom(chatHistory);
@@ -271,9 +271,10 @@ document.addEventListener('DOMContentLoaded', function() {
             displayQueries(data);
             updateAuditTrail(queryText, data);
 
-            // Clear input
+            // Clear input and reset height
             queryInput.value = '';
             queryInput.style.height = 'auto';
+            queryInput.style.height = (queryInput.scrollHeight) + 'px';
         })
         .catch(error => {
             console.error("Error:", error);
@@ -312,6 +313,10 @@ document.addEventListener('DOMContentLoaded', function() {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
     });
+
+    // Initialize textarea height
+    queryInput.style.height = 'auto';
+    queryInput.style.height = (queryInput.scrollHeight) + 'px';
 });
 </script>
 
