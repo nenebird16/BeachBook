@@ -21,11 +21,31 @@ app.register_blueprint(journal_routes)
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
 
+def verify_environment():
+    """Verify required environment variables are present"""
+    required_vars = {
+        'NEO4J_URI': os.environ.get('NEO4J_URI'),
+        'NEO4J_USER': os.environ.get('NEO4J_USER'),
+        'NEO4J_PASSWORD': os.environ.get('NEO4J_PASSWORD'),
+    }
+
+    missing = [var for var, value in required_vars.items() if not value]
+    if missing:
+        logger.error(f"Missing required environment variables: {', '.join(missing)}")
+        return False
+
+    logger.info("All required environment variables are present")
+    return True
+
 def init_services():
     """Initialize all required services"""
     services = {}
 
     try:
+        # Verify environment variables first
+        if not verify_environment():
+            raise ValueError("Required environment variables are missing")
+
         # Initialize graph service
         logger.info("Initializing graph service...")
         graph_service = GraphService()
@@ -54,19 +74,50 @@ def init_services():
         logger.info("LlamaService initialized successfully")
 
     except Exception as e:
-        logger.error(f"Failed to initialize services: {str(e)}")
+        logger.error(f"Failed to initialize services: {str(e)}", exc_info=True)
         raise
 
     return services
 
 # Initialize services
-services = init_services()
+try:
+    services = init_services()
+    # Make services available to the app context
+    app.config['graph_db'] = services.get('graph_db')
+    app.config['semantic_processor'] = services.get('semantic_processor')
+    app.config['document_processor'] = services.get('document_processor')
+    app.config['llama_service'] = services.get('llama_service')
+except Exception as e:
+    logger.error(f"Application startup failed: {str(e)}", exc_info=True)
+    # Allow the app to start in a degraded state
+    services = {}
 
-# Make services available to the app context
-app.config['graph_db'] = services.get('graph_db')
-app.config['semantic_processor'] = services.get('semantic_processor')
-app.config['document_processor'] = services.get('document_processor')
-app.config['llama_service'] = services.get('llama_service')
+@app.route('/health')
+def health_check():
+    """Simple health check endpoint"""
+    try:
+        # Check if required services are initialized
+        services_status = {
+            'graph_db': app.config.get('graph_db') is not None,
+            'semantic_processor': app.config.get('semantic_processor') is not None,
+            'document_processor': app.config.get('document_processor') is not None,
+            'llama_service': app.config.get('llama_service') is not None
+        }
+
+        # Verify Neo4j environment variables
+        env_vars_present = verify_environment()
+
+        return jsonify({
+            'status': 'healthy' if all(services_status.values()) and env_vars_present else 'degraded',
+            'services': services_status,
+            'environment': env_vars_present
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
 
 @app.route('/')
 def index():
@@ -126,7 +177,7 @@ def query_knowledge():
         return jsonify(response), 200
 
     except Exception as e:
-        logger.error(f"Error processing query with LlamaService: {str(e)}")
+        logger.error(f"Error processing query with LlamaService: {str(e)}", exc_info=True)
         return jsonify({
             'error': 'Failed to process query',
             'response': 'I encountered an error while processing your question. Please try again.'
