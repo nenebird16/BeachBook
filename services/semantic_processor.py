@@ -29,8 +29,8 @@ class SemanticProcessor:
 
             # Initialize transformer model
             self.logger.info("Initializing transformer model...")
-            self.tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
-            self.model = AutoModel.from_pretrained('distilbert-base-uncased')
+            self.tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased', local_files_only=False)
+            self.model = AutoModel.from_pretrained('distilbert-base-uncased', local_files_only=False)
             
             self.logger.info("Successfully initialized semantic processing")
 
