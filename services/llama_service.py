@@ -205,9 +205,19 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             # Get document count and sample titles
             doc_query = f"""
             MATCH (d:Document)
-            WITH d, apoc.text.clean(d.title) as cleaned_title, apoc.text.clean(d.content) as cleaned_content
-            CALL apoc.algo.cosineSimilarity(d.embedding, $embedding, {0.8}) YIELD similarity AS embedding_score
-            WHERE embedding_score > 0.3 OR (toLower(cleaned_title) CONTAINS $keyword OR toLower(cleaned_content) CONTAINS $keyword)
+            WITH d, 
+                 toLower(d.title) as cleaned_title, 
+                 toLower(d.content) as cleaned_content,
+                 d.embedding as doc_embedding,
+                 $embedding as query_embedding
+            WITH d, cleaned_title, cleaned_content,
+                 reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
+                   dot + doc_embedding[i] * query_embedding[i]) /
+                 (sqrt(reduce(norm = 0.0, i IN range(0, size(doc_embedding)-1) | 
+                   norm + doc_embedding[i] * doc_embedding[i])) *
+                  sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
+                   norm + query_embedding[i] * query_embedding[i]))) as embedding_score
+            WHERE embedding_score > 0.3 OR cleaned_title CONTAINS $keyword OR cleaned_content CONTAINS $keyword
             RETURN d, embedding_score
             ORDER BY embedding_score DESC
             LIMIT 5
