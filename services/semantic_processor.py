@@ -4,7 +4,8 @@ import spacy
 import nltk
 from nltk.tokenize import sent_tokenize
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer, AutoModel
+import torch
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,9 +27,10 @@ class SemanticProcessor:
                 spacy.cli.download("en_core_web_md")
                 self.nlp = spacy.load("en_core_web_md")
 
-            # Initialize sentence transformer
-            self.logger.info("Initializing sentence transformer model...")
-            self.transformer = SentenceTransformer('all-MiniLM-L6-v2')
+            # Initialize transformer model
+            self.logger.info("Initializing transformer model...")
+            self.tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
+            self.model = AutoModel.from_pretrained('distilbert-base-uncased')
             
             self.logger.info("Successfully initialized semantic processing")
 
@@ -39,8 +41,11 @@ class SemanticProcessor:
     def get_text_embedding(self, text: str) -> list:
         """Get text embedding using sentence transformers"""
         try:
-            embedding = self.transformer.encode(text, convert_to_numpy=True)
-            return embedding.tolist()
+            inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            embeddings = outputs.last_hidden_state.mean(dim=1)
+            return embeddings[0].numpy().tolist()
         except Exception as e:
             self.logger.error(f"Error generating text embedding: {str(e)}")
             raise
