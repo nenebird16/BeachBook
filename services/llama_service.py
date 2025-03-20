@@ -207,14 +207,24 @@ class LlamaService:
             if not hasattr(self, 'graph') or not self.graph:
                 raise RuntimeError("Neo4j connection not established")
 
-            # DEBUG: Return test response to verify endpoint
-            self.logger.debug("Returning debug response to verify endpoint functionality")
+            # Execute knowledge graph search
+            semantic_data = self.semantic_processor.analyze_query(query_text)
+
+            # Get query embedding
+            query_embedding = semantic_data.get('embedding')
+
+            # Get graph context
+            graph_results = self._get_graph_overview()
+
+            # Generate response using Claude
+            response = self.generate_response(query_text, graph_results)
+
             return {
-                'response': f"Debug response - Query received: {query_text}",
+                'response': response,
                 'technical_details': {
                     'queries': {
-                        'debug_mode': True,
-                        'query_text': query_text
+                        'semantic_data': semantic_data,
+                        'graph_context': graph_results
                     }
                 }
             }
