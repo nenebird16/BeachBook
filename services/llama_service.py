@@ -94,7 +94,7 @@ class LlamaService:
             self.logger.info(f"Processing query: {query_text}")
 
             # Get graph context if available (lazy-loaded)
-            graph_results = self._get_graph_overview() if self.graph else None
+            graph_results = self._get_graph_overview(query_text) if self.graph else None
 
             # Generate response using Claude
             response = self.generate_response(query_text, graph_results)
@@ -182,11 +182,13 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             self.logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return "I apologize, but I encountered an error while generating a response. Please try again."
 
-    def _get_graph_overview(self) -> Optional[str]:
+    def _get_graph_overview(self, query_text: str) -> Optional[str]:
         """Get an overview of entities and topics in the graph"""
         try:
             if not self.graph:
                 return None
+
+            keyword = query_text.lower()
 
             # Get all entity types and their instances
             entity_query = """
@@ -198,27 +200,30 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             entity_results = self.graph.run(entity_query).data()
 
             # Get document count and sample titles
-            doc_query = """
+            doc_query = f"""
             MATCH (d:Document)
-            RETURN count(d) as doc_count,
-                   collect(distinct d.title)[..5] as sample_titles
+            WITH d, apoc.text.clean(d.title) as cleaned_title, apoc.text.clean(d.content) as cleaned_content
+            CALL apoc.algo.cosineSimilarity(d.embedding, $embedding, {0.8}) YIELD similarity AS embedding_score
+            WHERE embedding_score > 0.3 OR (toLower(cleaned_title) CONTAINS $keyword OR toLower(cleaned_content) CONTAINS $keyword)
+            RETURN d, embedding_score
+            ORDER BY embedding_score DESC
+            LIMIT 5
             """
-            doc_results = self.graph.run(doc_query).data()
+            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.embed(query_text), keyword=keyword).data()
 
-            if not entity_results and not doc_results[0]['doc_count']:
+
+            if not entity_results and not doc_results:
                 return None
 
             # Format overview
             overview = []
 
             # Add document information
-            if doc_results[0]['doc_count']:
-                overview.append(f"Documents: {doc_results[0]['doc_count']} total")
-                if doc_results[0]['sample_titles']:
-                    overview.append("Sample documents:")
-                    for title in doc_results[0]['sample_titles']:
-                        overview.append(f"- {title}")
-                    overview.append("")
+            if doc_results:
+                overview.append(f"Documents:")
+                for result in doc_results:
+                    overview.append(f"- {result['d']['title']}")
+                overview.append("")
 
             # Add entity information
             if entity_results:
