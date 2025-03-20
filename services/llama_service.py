@@ -223,13 +223,16 @@ Since I don't find any matches in the knowledge graph for this query, I should:
 
             # Enhanced entity-focused query
             entity_query = """
-            // Match entities based on name matches
+            // Match entities and their relationships
             MATCH (e:Entity)
             WHERE e.name IS NOT NULL
-            AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
+            AND (
+                any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
+                OR exists((e)-[:RELATES_TO|DEVELOPS|FOCUSES_ON|CONTAINS]-())
+            )
             
             // Get connected documents and relationships
-            OPTIONAL MATCH (d:Document)-[r:CONTAINS]->(e)
+            OPTIONAL MATCH (d:Document)-[r]->(e)
             WHERE d.title IS NOT NULL
             
             // Aggregate results with scoring
