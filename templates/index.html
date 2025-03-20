@@ -170,6 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function displayQueries(data) {
         console.log("Displaying queries:", data); // Debug log
         const queries = data.technical_details?.queries;
+        const graphContext = queries?.graph_context;
 
         if (!queries) {
             cypherQueries.innerHTML = '<div class="alert alert-info">No queries generated.</div>';
@@ -178,29 +179,36 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let queryContent = '';
 
-        // Display content query
-        if (queries.content_query) {
+        // Display graph context
+        if (graphContext) {
             queryContent += `
                 <div class="cypher-query mb-3">
-                    <h6>Main Search Query:</h6>
-                    <pre><code>${queries.content_query.trim()}</code></pre>
+                    <h6>Graph Context:</h6>
+                    <pre><code>${graphContext}</code></pre>
                 </div>
             `;
         }
 
-        // Display entity query
-        if (queries.entity_query) {
+        // Add query analysis
+        if (queries.semantic_data) {
             queryContent += `
                 <div class="cypher-query mb-3">
-                    <h6>Related Entities Query:</h6>
-                    <pre><code>${queries.entity_query.trim()}</code></pre>
+                    <h6>Query Analysis:</h6>
+                    <pre><code>${JSON.stringify(queries.semantic_data, null, 2)}</code></pre>
                 </div>
             `;
         }
 
-        // Display search patterns
-        if (queries.parameters?.search_patterns) {
-            queryContent += `
+        // Add to audit trail
+        const timestamp = new Date().toLocaleTimeString();
+        const queryText = data.technical_details?.queries?.query_text || 'Unknown query';
+        auditTrail.innerHTML += `
+            <div class="audit-entry mb-2">
+                <small class="text-muted">${timestamp}</small>
+                <div>Query: "${queryText}"</div>
+                <div>Graph context retrieved successfully</div>
+            </div>
+        `;
                 <div class="cypher-query mb-3">
                     <h6>Search Patterns:</h6>
                     <pre><code>${JSON.stringify(queries.parameters.search_patterns, null, 2)}</code></pre>
