@@ -158,11 +158,7 @@ class LlamaService:
 Context information:
 {context_info}
 
-Please provide a natural, conversational response that:
-1. Directly answers the query using the context provided
-2. Incorporates relevant information from the context
-3. Highlights key relationships between concepts
-4. Suggests related areas to explore if relevant"""
+Please provide a natural, conversational response using information from the provided context. Use concise numbered references to documents at the end of relevant statements (e.g. 'Anders Mol is a significant player[1]'). Focus on direct information and relationships found in the documents."""
             else:
                 is_content_query = any(keyword in query.lower() for keyword in 
                     ['what', 'tell me about', 'show me', 'list', 'topics'])
