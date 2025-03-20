@@ -186,28 +186,40 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             return "I apologize, but I encountered an error while generating a response. Please try again."
 
     def _get_graph_overview(self, query_text: str) -> Optional[str]:
-        """Get an overview of entities and topics in the graph"""
+        """Enhanced graph overview with hybrid retrieval"""
         try:
             if not self.graph:
                 return None
 
-            keyword = query_text.lower()
+            # Extract query entities and keywords
+            doc = self._semantic_processor.nlp(query_text)
+            query_entities = [ent.text.lower() for ent in doc.ents]
+            keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
 
-            # Get all entity types and their instances
+            # Hybrid query combining semantic, keyword, and graph structure
             entity_query = """
             MATCH (e:Entity)
-            WITH e.type as type, collect(distinct e.name) as entities
-            RETURN type, entities
-            ORDER BY size(entities) DESC
+            WHERE any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
+            OR e.name IN $entities
+            WITH e, e.type as type
+            WITH type, collect(distinct e.name) as entities,
+                 count(distinct e) as relevance
+            RETURN type, entities, relevance
+            ORDER BY relevance DESC
             """
             entity_results = self.graph.run(entity_query).data()
 
             # Enhanced hybrid retrieval combining semantic and graph structure
             doc_query = """
-            MATCH (d:Document)
+            MATCH (d:Document)-[r:CONTAINS]->(e:Entity)
+            WHERE any(keyword IN $keywords WHERE 
+                  toLower(d.title) CONTAINS keyword OR
+                  toLower(d.content) CONTAINS keyword)
+            OR e.name IN $entities
             WITH d {.title, .content} as doc_info,
                  d.embedding as doc_embedding,
-                 $embedding as query_embedding
+                 $embedding as query_embedding,
+                 count(distinct e) as entity_matches
             WITH doc_info, doc_embedding, query_embedding,
                  CASE 
                     WHEN doc_embedding IS NOT NULL
@@ -218,10 +230,15 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                          sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
                          norm + query_embedding[i] * query_embedding[i])))
                     ELSE 0.0
-                 END as embedding_score
-            WHERE embedding_score > 0.3
-            RETURN doc_info, embedding_score
-            ORDER BY embedding_score DESC
+                 END as semantic_score,
+                 entity_matches
+            WITH doc_info, 
+                 semantic_score * 0.6 + 
+                 CASE WHEN entity_matches > 0 
+                 THEN 0.4 * (entity_matches/5.0) ELSE 0 END as combined_score
+            WHERE combined_score > 0.3
+            RETURN doc_info, combined_score, entity_matches
+            ORDER BY combined_score DESC
             LIMIT 5
             """
             doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.get_text_embedding(query_text)).data()
