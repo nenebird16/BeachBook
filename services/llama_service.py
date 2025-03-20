@@ -196,18 +196,27 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             query_entities = [ent.text.lower() for ent in doc.ents]
             keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
 
-            # Hybrid query combining semantic, keyword, and graph structure
+            # Hybrid query combining semantic and graph structure
             entity_query = """
-            MATCH (d:Document)-[:CONTAINS]->(e:Entity)
-            WHERE d.content IS NOT NULL AND any(keyword IN $keywords WHERE toLower(d.content) CONTAINS keyword) OR e.name IN $entities
-            WITH e.type as type, 
-                 collect(DISTINCT e.name) as entities,
-                 count(DISTINCT d) as doc_count
-            WHERE doc_count > 0
-            RETURN type, entities, doc_count
-            ORDER BY doc_count DESC
+            MATCH (d:Document)
+            WHERE d.content IS NOT NULL
+            WITH d
+            MATCH (d)-[:CONTAINS]->(e:Entity)
+            WHERE any(keyword IN $keywords WHERE toLower(d.content) CONTAINS toLower(keyword))
+               OR toLower(e.name) IN [keyword IN $entities | toLower(keyword)]
+            WITH d, e.type as type, e.name as entity_name,
+                 count(DISTINCT d) as relevance
+            ORDER BY relevance DESC
+            WITH type, collect(DISTINCT entity_name) as entities,
+                 sum(relevance) as total_relevance
+            WHERE size(entities) > 0
+            RETURN type, entities, total_relevance
+            ORDER BY total_relevance DESC
+            LIMIT 10
             """
-            entity_results = self.graph.run(entity_query, keywords=keywords, entities=query_entities).data()
+            entity_results = self.graph.run(entity_query, 
+                                          keywords=keywords, 
+                                          entities=[e.lower() for e in query_entities]).data()
 
             # Enhanced hybrid retrieval combining semantic and graph structure
             doc_query = """
