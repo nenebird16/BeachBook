@@ -205,6 +205,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             # Get document count and sample titles
             doc_query = f"""
             MATCH (d:Document)
+            WHERE d.content IS NOT NULL
             WITH d, 
                  toLower(d.title) as cleaned_title, 
                  toLower(d.content) as cleaned_content,
@@ -221,8 +222,8 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                          norm + query_embedding[i] * query_embedding[i])))
                     ELSE 0.0
                  END as embedding_score
-            WHERE doc_embedding IS NULL OR embedding_score > 0.3 OR cleaned_title CONTAINS $keyword OR cleaned_content CONTAINS $keyword
-            RETURN d, embedding_score
+            WHERE embedding_score > 0.3 OR cleaned_title CONTAINS $keyword OR cleaned_content CONTAINS $keyword
+            RETURN d {.title, .content}, embedding_score
             ORDER BY embedding_score DESC
             LIMIT 5
             """
