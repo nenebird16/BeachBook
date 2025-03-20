@@ -319,7 +319,13 @@ class LlamaService:
         query = """
         MATCH (d:Document)
         WHERE d.embedding IS NOT NULL
-        WITH d, gds.similarity.cosine(d.embedding, $embedding) AS score
+        WITH d, 
+        REDUCE(dot = 0.0, i IN RANGE(0, SIZE($embedding)-1) | 
+            dot + d.embedding[i] * $embedding[i]) /
+        (SQRT(REDUCE(norm1 = 0.0, i IN RANGE(0, SIZE($embedding)-1) | 
+            norm1 + d.embedding[i] * d.embedding[i])) *
+        SQRT(REDUCE(norm2 = 0.0, i IN RANGE(0, SIZE($embedding)-1) | 
+            norm2 + $embedding[i] * $embedding[i]))) AS score
         WHERE score > $threshold
         RETURN d.title, d.content, score
         ORDER BY score DESC
