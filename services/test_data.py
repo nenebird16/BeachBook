@@ -33,18 +33,22 @@ def setup_test_data():
         for doc in docs:
             try:
                 logger.info(f"Processing document: {doc['title']}")
+                
+                # Generate embedding first
+                doc['embedding'] = semantic_processor.get_text_embedding(doc['content'])
+                logger.info(f"Generated embedding of length: {len(doc['embedding'])}")
+                
+                # Create document node with embedding
                 doc_node = graph.create_document_node(doc)
                 logger.info(f"Created document node: {doc_node}")
                 
+                # Extract and create entities
                 entities = doc_processor._extract_entities(doc['content'])
                 logger.info(f"Extracted {len(entities)} entities")
                 
                 for entity in entities:
-                    graph.create_entity_node(entity, doc_node)
-                
-                # Add embeddings
-                doc['embedding'] = semantic_processor.get_text_embedding(doc['content'])
-                logger.info(f"Added embeddings of length: {len(doc['embedding'])}")
+                    entity_node = graph.create_entity_node(entity, doc_node)
+                    logger.info(f"Created entity node: {entity['name']} ({entity['type']})")
             except Exception as e:
                 logger.error(f"Error processing document {doc['title']}: {str(e)}")
                 raise
