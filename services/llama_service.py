@@ -88,11 +88,23 @@ class LlamaService:
         try:
             self.logger.info(f"Processing query: {query_text}")
 
-            # Execute knowledge graph search
+            # Execute semantic search first
             semantic_data = self.semantic_processor.analyze_query(query_text)
-
-            # Get graph context
-            graph_results = self._get_graph_overview()
+            query_embedding = semantic_data['embedding']
+            
+            # Find semantically similar documents
+            similar_docs = self._find_similar_documents(query_embedding)
+            
+            # Get relevant entities from those documents
+            relevant_entities = self._get_relevant_entities(similar_docs)
+            
+            # Get focused context based on query type
+            graph_results = self._get_focused_context(
+                query_text, 
+                semantic_data['focus'],
+                similar_docs,
+                relevant_entities
+            )
 
             # Generate response using Claude
             response = self.generate_response(query_text, graph_results)
@@ -301,3 +313,63 @@ class LlamaService:
         except Exception as e:
             self.logger.error(f"Error executing template query: {str(e)}")
             raise
+
+    def _find_similar_documents(self, query_embedding, threshold=0.7):
+        """Find documents with similar embeddings"""
+        query = """
+        MATCH (d:Document)
+        WHERE d.embedding IS NOT NULL
+        WITH d, gds.similarity.cosine(d.embedding, $embedding) AS score
+        WHERE score > $threshold
+        RETURN d.title, d.content, score
+        ORDER BY score DESC
+        LIMIT 5
+        """
+        return self.graph.run(query, embedding=query_embedding, threshold=threshold).data()
+
+    def _get_relevant_entities(self, documents):
+        """Get entities from relevant documents"""
+        doc_titles = [doc['title'] for doc in documents]
+        query = """
+        MATCH (d:Document)-[:CONTAINS]->(e:Entity)
+        WHERE d.title IN $titles
+        RETURN DISTINCT e.name, e.type, count(d) as relevance
+        ORDER BY relevance DESC
+        """
+        return self.graph.run(query, titles=doc_titles).data()
+
+    def _get_focused_context(self, query_text, focus, docs, entities):
+        """Get focused context based on query intent"""
+        context = []
+        
+        # Add document summaries
+        if docs:
+            context.append("Relevant documents:")
+            for doc in docs[:3]:
+                context.append(f"- {doc['title']} (similarity: {doc['score']:.2f})")
+
+        # Add entity information
+        if entities:
+            context.append("\nKey concepts:")
+            for entity in entities[:5]:
+                context.append(f"- {entity['name']} ({entity['type']})")
+
+        # Add targeted relationship queries based on focus
+        if focus.get('main_noun'):
+            related = self._get_related_concepts(focus['main_noun'])
+            if related:
+                context.append("\nRelated concepts:")
+                context.extend(related)
+
+        return "\n".join(context)
+
+    def _get_related_concepts(self, concept):
+        """Get concepts related to the main query focus"""
+        query = """
+        MATCH (e:Entity {name: $concept})-[r]-(related:Entity)
+        RETURN type(r) as relationship, related.name, related.type
+        LIMIT 5
+        """
+        results = self.graph.run(query, concept=concept).data()
+        return [f"- {r['related.name']} ({r['relationship']}) {r['related.type']}"
+                for r in results]
