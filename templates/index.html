@@ -257,6 +257,9 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log("Server response:", data); // Debug log
 
             if (data.error) throw new Error(data.error);
+            
+            // Clear input after successful submission
+            queryInput.value = '';
 
             // Process response to add superscript references
             let processedResponse = data.response;
