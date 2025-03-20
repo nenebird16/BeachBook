@@ -220,10 +220,10 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             if not self.graph:
                 return None
 
-            # Extract query entities and keywords
-            doc = self._semantic_processor.nlp(query_text)
-            query_entities = [ent.text.lower() for ent in doc.ents]
-            keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
+            # Extract query entities and keywords using semantic processor
+            semantic_analysis = self._semantic_processor.analyze_query(query_text)
+            query_entities = [entity['text'].lower() for entity in semantic_analysis['entities']]
+            keywords = query_text.lower().split()
 
             # Enhanced entity-focused query
             entity_query = """
