@@ -36,14 +36,14 @@ def init_services():
         services['llama_service'] = llama_service
         logger.info(f"LlamaService initialization took {time.time() - service_start:.2f} seconds")
 
-        # Initialize semantic processor if LlamaService is healthy
-        if llama_service and llama_service.anthropic:
+        # Initialize semantic processor if any LLM service is available
+        if llama_service and (llama_service.anthropic or llama_service._openai):
             service_start = time.time()
             semantic_processor = SemanticProcessor()
             services['semantic_processor'] = semantic_processor
             logger.info(f"SemanticProcessor initialization took {time.time() - service_start:.2f} seconds")
         else:
-            logger.warning("Skipping SemanticProcessor initialization - LlamaService unavailable")
+            logger.warning("Skipping SemanticProcessor initialization - No LLM service available")
 
         # Initialize graph service if environment variables are present
         if all([os.environ.get(var) for var in ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD']]):

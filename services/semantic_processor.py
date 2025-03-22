@@ -1,10 +1,11 @@
-
 import logging
-import spacy
 import nltk
-from nltk.tokenize import sent_tokenize
+from nltk.tokenize import sent_tokenize, word_tokenize
 import numpy as np
 from sentence_transformers import SentenceTransformer
+import torch
+from typing import List, Dict, Any
+import spacy
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -14,33 +15,27 @@ nltk.download('punkt', quiet=True)
 
 class SemanticProcessor:
     def __init__(self):
-        """Initialize the semantic processor with spaCy model and sentence transformers"""
+        """Initialize the semantic processor with sentence transformers and spaCy"""
         self.logger = logging.getLogger(__name__)
         try:
-            # Initialize spaCy model
-            self.logger.info("Initializing spaCy model...")
-            try:
-                self.nlp = spacy.load("en_core_web_md")
-            except OSError:
-                self.logger.warning("SpaCy model not found, downloading now...")
-                spacy.cli.download("en_core_web_md")
-                self.nlp = spacy.load("en_core_web_md")
-
-            # Initialize sentence transformer
+            # Initialize sentence transformer model
             self.logger.info("Initializing sentence transformer model...")
-            self.transformer = SentenceTransformer('all-MiniLM-L6-v2')
-            
+            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+            self.logger.info("Successfully initialized sentence transformer")
+            # Initialize spaCy NLP model
+            self.logger.info("Initializing spaCy NLP model...")
+            self.nlp = spacy.load("en_core_web_sm")
+            self.logger.info("Successfully initialized spaCy NLP model")
             self.logger.info("Successfully initialized semantic processing")
-
         except Exception as e:
             self.logger.error(f"Failed to initialize semantic processor: {str(e)}")
             raise
 
     def get_text_embedding(self, text: str) -> list:
-        """Get text embedding using sentence transformers"""
+        """Get text embedding using sentence-transformers"""
         try:
-            embedding = self.transformer.encode(text, convert_to_numpy=True)
-            return embedding.tolist()
+            embeddings = self.model.encode(text, convert_to_tensor=True)
+            return embeddings.cpu().numpy().tolist()
         except Exception as e:
             self.logger.error(f"Error generating text embedding: {str(e)}")
             raise
@@ -51,28 +46,6 @@ class SemanticProcessor:
             # Create document chunks
             chunks = self._create_chunks(content)
 
-            # Extract entities and relationships
-            doc = self.nlp(content)
-            entities = []
-            relationships = []
-
-            for ent in doc.ents:
-                entities.append({
-                    "text": ent.text,
-                    "label": ent.label_,
-                    "start": ent.start_char,
-                    "end": ent.end_char
-                })
-
-            # Extract basic relationships between entities
-            for token in doc:
-                if token.dep_ in ['nsubj', 'dobj', 'pobj']:
-                    relationships.append({
-                        "subject": token.head.text,
-                        "predicate": token.dep_,
-                        "object": token.text
-                    })
-
             # Generate embeddings for chunks
             embeddings = []
             for chunk in chunks:
@@ -82,9 +55,11 @@ class SemanticProcessor:
                     "embedding": embedding
                 })
 
+            # Extract entities using enhanced NLP techniques
+            entities = self._extract_entities(content)
+
             return {
                 "entities": entities,
-                "relationships": relationships,
                 "chunks": chunks,
                 "embeddings": embeddings
             }
@@ -102,25 +77,12 @@ class SemanticProcessor:
             query_embedding = self.get_text_embedding(query)
             self.logger.debug("Generated query embedding successfully")
 
-            # Extract query entities and intent
-            doc = self.nlp(query)
-            query_entities = [{'text': ent.text, 'label': ent.label_}
-                            for ent in doc.ents]
-            self.logger.debug(f"Extracted entities: {query_entities}")
-
-            # Identify main focus of query
-            root = next(token for token in doc if token.head == token)
-            focus = {
-                'root_verb': root.text if root.pos_ == 'VERB' else None,
-                'main_noun': next((token.text for token in doc
-                                 if token.pos_ == 'NOUN'), None)
-            }
-            self.logger.debug(f"Query focus: {focus}")
+            # Basic query analysis
+            query_entities = self._extract_entities(query)
 
             result = {
                 'embedding': query_embedding,
-                'entities': query_entities,
-                'focus': focus
+                'entities': query_entities
             }
             self.logger.debug("Query analysis completed successfully")
             return result
@@ -156,3 +118,19 @@ class SemanticProcessor:
         except Exception as e:
             self.logger.error(f"Error creating chunks: {str(e)}")
             return [text]  # Return the full text as a single chunk if chunking fails
+
+    def _extract_entities(self, text: str) -> list:
+        """Extract entities using enhanced NLP techniques"""
+        entities = []
+        doc = self.nlp(text)
+
+        for ent in doc.ents:
+            entities.append({
+                "text": ent.text,
+                "label": ent.label_,
+                "start": ent.start_char,
+                "end": ent.end_char,
+                "context": text[max(0, ent.start_char-50):min(len(text), ent.end_char+50)]
+            })
+
+        return entities

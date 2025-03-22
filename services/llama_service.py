@@ -4,6 +4,7 @@ import time
 from typing import Dict, List, Any, Optional
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from anthropic import Anthropic
+from openai import OpenAI
 from services.semantic_processor import SemanticProcessor
 
 logger = logging.getLogger(__name__)
@@ -13,40 +14,59 @@ class LlamaService:
         """Initialize the LlamaService with required components"""
         self.logger = logging.getLogger(__name__)
         self._anthropic = None
+        self._openai = None
         self._graph = None
         self._semantic_processor = None
 
-        # Initialize only the core Anthropic client
-        self._init_anthropic()
+        # Try to initialize LLM clients
+        self._init_llm_clients()
 
         # Log initialization status
         self.logger.info("LlamaService initialization complete. Status:")
         self.logger.info(f"- Anthropic client: {'Available' if self._anthropic else 'Unavailable'}")
+        self.logger.info(f"- OpenAI client: {'Available' if self._openai else 'Unavailable'}")
         self.logger.info("Optional components will be initialized on first use")
 
-    def _init_anthropic(self):
-        """Initialize the Anthropic client and semantic processor"""
+    def _init_llm_clients(self):
+        """Initialize available LLM clients"""
         try:
             start_time = time.time()
-            api_key = os.environ.get('ANTHROPIC_API_KEY')
 
-            if not api_key:
-                self.logger.warning("ANTHROPIC_API_KEY not found in environment variables")
-                return
+            # Try Anthropic first
+            anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
+            if anthropic_key:
+                try:
+                    self._anthropic = Anthropic()
+                    self.logger.info("Anthropic client initialized successfully")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize Anthropic: {str(e)}")
+                    self._anthropic = None
+            else:
+                self.logger.warning("ANTHROPIC_API_KEY not found")
 
-            try:
-                self._anthropic = Anthropic()
+            # Try OpenAI if Anthropic is not available
+            if not self._anthropic:
+                openai_key = os.environ.get('OPENAI_API_KEY')
+                if openai_key:
+                    try:
+                        self._openai = OpenAI()
+                        self.logger.info("OpenAI client initialized successfully")
+                    except Exception as e:
+                        self.logger.error(f"Failed to initialize OpenAI: {str(e)}")
+                        self._openai = None
+                else:
+                    self.logger.warning("OPENAI_API_KEY not found")
+
+            # Initialize semantic processor if any LLM client is available
+            if self._anthropic or self._openai:
                 self._semantic_processor = SemanticProcessor()
                 init_time = time.time() - start_time
-                self.logger.info(f"Anthropic client and semantic processor initialized successfully in {init_time:.2f} seconds")
-            except Exception as e:
-                self.logger.error(f"Failed to initialize services: {str(e)}")
-                self._anthropic = None
-                self._semantic_processor = None
+                self.logger.info(f"Services initialized in {init_time:.2f} seconds")
 
         except Exception as e:
             self.logger.error(f"Error during service initialization: {str(e)}", exc_info=True)
             self._anthropic = None
+            self._openai = None
             self._semantic_processor = None
 
     @property
@@ -86,7 +106,7 @@ class LlamaService:
     def process_query(self, query_text: str) -> Dict[str, Any]:
         """Process a query and generate a response"""
         try:
-            if not self.anthropic:
+            if not (self._anthropic or self._openai):
                 return {
                     'response': "I apologize, but the knowledge service is currently unavailable. Please try again later.",
                     'technical_details': {
@@ -121,17 +141,14 @@ class LlamaService:
             }
 
     def generate_response(self, query: str, context_info: Optional[str] = None) -> str:
-        """Generate a natural language response using Claude"""
+        """Generate a natural language response using available LLM"""
         try:
-            if not self.anthropic:
+            if not self._anthropic and not self._openai:
                 return "The knowledge service is currently unavailable. Please try again later."
 
             self.logger.debug("Starting response generation")
             self.logger.debug(f"Query: {query}")
             self.logger.debug(f"Context available: {'Yes' if context_info else 'No'}")
-
-            # the newest Anthropic model is "claude-3-5-sonnet-20241022" which was released October 22, 2024
-            model = "claude-3-5-sonnet-20241022"
 
             system_message = "I am a knowledge graph assistant that only provides information from the connected graph database. I stay focused on available content and politely decline general conversation."
 
@@ -141,11 +158,7 @@ class LlamaService:
 Context information:
 {context_info}
 
-Please provide a natural, conversational response that:
-1. Directly answers the query using the context provided
-2. Incorporates relevant information from the context
-3. Highlights key relationships between concepts
-4. Suggests related areas to explore if relevant"""
+Please provide a natural, conversational response using information from the provided context. Group related information into paragraphs and add the reference number at the end of each paragraph, not within the text. Do not mention document titles directly. Focus on facts and relationships found in the documents."""
             else:
                 is_content_query = any(keyword in query.lower() for keyword in 
                     ['what', 'tell me about', 'show me', 'list', 'topics'])
@@ -162,21 +175,33 @@ Since I don't find any matches in the knowledge graph for this query, I should:
 3. Keep the response brief and focused"""
 
             try:
-                self.logger.debug("Sending request to Anthropic")
-                response = self.anthropic.messages.create(
-                    model=model,
-                    max_tokens=1000,
-                    temperature=0.7,
-                    messages=[
-                        {"role": "assistant", "content": system_message},
-                        {"role": "user", "content": user_message}
-                    ]
-                )
-                self.logger.debug("Successfully received response from Anthropic")
-                return response.content[0].text
+                if self._anthropic:
+                    self.logger.debug("Using Anthropic for response generation")
+                    response = self._anthropic.messages.create(
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=1000,
+                        temperature=0.7,
+                        messages=[
+                            {"role": "assistant", "content": system_message},
+                            {"role": "user", "content": user_message}
+                        ]
+                    )
+                    return response.content[0].text
+                else:
+                    self.logger.debug("Using OpenAI for response generation")
+                    response = self._openai.chat.completions.create(
+                        model="gpt-4-turbo-preview",
+                        max_tokens=1000,
+                        temperature=0.7,
+                        messages=[
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": user_message}
+                        ]
+                    )
+                    return response.choices[0].message.content
 
             except Exception as e:
-                self.logger.error(f"Error calling Anthropic API: {str(e)}", exc_info=True)
+                self.logger.error(f"Error calling LLM API: {str(e)}", exc_info=True)
                 self.logger.error(f"Exception type: {type(e)}")
                 self.logger.error(f"Exception args: {e.args}")
                 raise
@@ -191,22 +216,35 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             if not self.graph:
                 return None
 
-            # Extract query entities and keywords
-            doc = self._semantic_processor.nlp(query_text)
-            query_entities = [ent.text.lower() for ent in doc.ents]
-            keywords = [token.text.lower() for token in doc if not token.is_stop and token.is_alpha]
+            # Extract query entities and keywords using semantic processor
+            semantic_analysis = self._semantic_processor.analyze_query(query_text)
+            query_entities = [entity['text'].lower() for entity in semantic_analysis['entities']]
+            keywords = query_text.lower().split()
+
+            # Initial keyword matching query
+            keyword_query = """
+            MATCH (d:Document)
+            WHERE any(keyword IN $keywords 
+                WHERE toLower(d.title) CONTAINS toLower(keyword))
+            RETURN d.title as matching_docs
+            """
+            keyword_matches = self.graph.run(keyword_query, 
+                                           keywords=keywords).data()
 
             # Enhanced entity-focused query
             entity_query = """
-            // Match entities based on name matches
+            // Match entities and their relationships
             MATCH (e:Entity)
             WHERE e.name IS NOT NULL
-            AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
-            
+            AND (
+                any(keyword IN $keywords WHERE toLower(e.name) CONTAINS toLower(keyword))
+                OR exists((e)-[:RELATES_TO|DEVELOPS|FOCUSES_ON|CONTAINS]-())
+            )
+
             // Get connected documents and relationships
-            OPTIONAL MATCH (d:Document)-[r:CONTAINS]->(e)
+            OPTIONAL MATCH (d:Document)-[r]->(e)
             WHERE d.title IS NOT NULL
-            
+
             // Aggregate results with scoring
             WITH e,
                  collect(DISTINCT {
@@ -214,7 +252,7 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                    relationship: type(r)
                  }) as document_refs,
                  count(DISTINCT d) as doc_count
-            
+
             RETURN {
               name: e.name,
               type: e.type,
@@ -224,9 +262,12 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             ORDER BY entity_info.relevance DESC
             LIMIT 10
             """
+            # Split query into keywords and remove punctuation
+            keywords = [word.strip('?.,!') for word in query_text.lower().split()]
+
             entity_results = self.graph.run(entity_query, 
-                                          keywords=keywords, 
-                                          entities=[e.lower() for e in query_entities]).data()
+                                          keywords=keywords,
+                                          entities=query_entities).data()
 
             # Enhanced hybrid retrieval combining semantic and graph structure
             doc_query = """
@@ -238,8 +279,9 @@ Since I don't find any matches in the knowledge graph for this query, I should:
             WITH d {.title, .content} as doc_info,
                  d.embedding as doc_embedding,
                  $embedding as query_embedding,
-                 count(distinct e) as entity_matches
-            WITH doc_info, doc_embedding, query_embedding, entity_matches,
+                 count(distinct e) as entity_matches,
+                 count(distinct r) as relationship_count
+            WITH doc_info, doc_embedding, query_embedding, entity_matches, relationship_count,
                  CASE 
                     WHEN doc_embedding IS NOT NULL
                     THEN reduce(dot = 0.0, i IN range(0, size(doc_embedding)-1) | 
@@ -249,40 +291,56 @@ Since I don't find any matches in the knowledge graph for this query, I should:
                          sqrt(reduce(norm = 0.0, i IN range(0, size(query_embedding)-1) | 
                          norm + query_embedding[i] * query_embedding[i])))
                     ELSE 0.0
-                 END as semantic_score
-            WITH doc_info, entity_matches,
-                 semantic_score * 0.6 + 
+                 END as semantic_score,
+                 CASE WHEN relationship_count > 0 THEN relationship_count / 5.0 ELSE 0 END AS relationship_score
+            WITH doc_info, entity_matches, relationship_score,
+                 semantic_score * 0.5 + 
+                 relationship_score * 0.3 +
                  CASE WHEN entity_matches > 0 
-                 THEN 0.4 * (entity_matches/5.0) ELSE 0 END as combined_score
+                 THEN 0.2 * (entity_matches/5.0) ELSE 0 END as combined_score
             WHERE combined_score > 0.3
             RETURN doc_info, combined_score, entity_matches
             ORDER BY combined_score DESC
             LIMIT 5
             """
-            doc_results = self.graph.run(doc_query, embedding=self._semantic_processor.get_text_embedding(query_text)).data()
+            doc_results = self.graph.run(doc_query, 
+                                       keywords=keywords,
+                                       entities=query_entities,
+                                       embedding=self._semantic_processor.get_text_embedding(query_text)).data()
 
 
             if not entity_results and not doc_results:
                 return None
 
-            # Format overview
+            # Format overview as a numbered reference list
             overview = []
+            ref_count = 1
+            doc_refs = {}
 
-            # Add document information
+            # Add document information with reference numbers
             if doc_results:
-                overview.append(f"Documents:")
+                overview.append("Referenced Documents:")
                 for result in doc_results:
-                    overview.append(f"- {result['doc_info']['title']}")
+                    title = result['doc_info']['title']
+                    doc_refs[title] = ref_count
+                    overview.append(f"[{ref_count}] {title}")
+                    ref_count += 1
                 overview.append("")
 
-            # Add entity information
+            # Add entity information with corresponding references
             if entity_results:
                 overview.append("Topics and concepts found:")
                 for result in entity_results:
-                    if result['type'] and result['entities']:  # Only show non-empty categories
-                        entity_type = result['type']
-                        entities = result['entities'][:5]  # Limit to 5 examples
-                        overview.append(f"- {entity_type.title()}: {', '.join(entities)}")
+                    entity_info = result['entity_info']
+                    if entity_info['type'] and entity_info['name']:
+                        entity_type = entity_info['type']
+                        name = entity_info['name']
+                        docs = entity_info['documents']
+                        overview.append(f"- {entity_type.title()}: {name}")
+                        if docs:
+                            ref_nums = [f"[{doc_refs[doc]}]" for doc in docs if doc in doc_refs]
+                            if ref_nums:
+                                overview.append(f"  Referenced in: {' '.join(ref_nums)}")
                 overview.append("")
 
             return "\n".join(overview)

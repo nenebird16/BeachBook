@@ -231,6 +231,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function submitQuery() {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
+        
+        // Clear input immediately
+        queryInput.value = '';
+        queryInput.style.height = 'auto';
 
         // Add user message to chat
         chatHistory.innerHTML += `
@@ -257,11 +261,37 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log("Server response:", data); // Debug log
 
             if (data.error) throw new Error(data.error);
+            
+            // Clear input after successful submission
+            queryInput.value = '';
 
-            // Display bot response
+            // Process response to add superscript references
+            let processedResponse = data.response;
+            const docRefs = new Set();
+            
+            // Extract document references from technical details
+            if (data.technical_details?.queries?.graph_context) {
+                const lines = data.technical_details.queries.graph_context.split('\n');
+                const docs = lines.filter(line => line.includes('Found in:'))
+                    .map(line => line.split('Found in:')[1].trim())
+                    .filter((doc, index, self) => self.indexOf(doc) === index);
+                
+                // Replace each document reference with a superscript number
+                docs.forEach((doc, index) => {
+                    const regex = new RegExp(doc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    processedResponse = processedResponse.replace(regex, `[${index + 1}]`);
+                    docRefs.add(`${index + 1}. ${doc}`);
+                });
+            }
+
+            // Display bot response with superscript references
             chatHistory.innerHTML += `
                 <div class="chat-message bot-message mb-2">
-                    <strong>Assistant:</strong> ${data.response}
+                    <strong>Assistant:</strong> ${processedResponse}
+                    ${docRefs.size > 0 ? `
+                    <div class="document-references mt-2">
+                        <small class="text-muted">References:<br>${Array.from(docRefs).join('<br>')}</small>
+                    </div>` : ''}
                 </div>
             `;
             scrollToBottom(chatHistory);

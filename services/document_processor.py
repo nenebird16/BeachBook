@@ -1,8 +1,8 @@
 import logging
 from datetime import datetime
-import spacy
-from typing import Dict, List
 import nltk
+from typing import Dict, List
+from sentence_transformers import SentenceTransformer
 
 # Download required NLTK data
 nltk.download('punkt', quiet=True)
@@ -13,19 +13,6 @@ class DocumentProcessor:
         self.graph_service = graph_service
         self.semantic_processor = semantic_processor
         self.logger = logging.getLogger(__name__)
-
-        try:
-            # Initialize spaCy model
-            try:
-                self.nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                self.logger.info("Downloading spaCy model...")
-                spacy.cli.download("en_core_web_sm")
-                self.nlp = spacy.load("en_core_web_sm")
-            self.logger.info("Successfully loaded spaCy model")
-        except Exception as e:
-            self.logger.error(f"Error loading spaCy model: {str(e)}")
-            raise
 
     def process_document(self, file) -> Dict:
         """Process uploaded document and store in knowledge graph with semantic analysis"""
@@ -60,11 +47,10 @@ class DocumentProcessor:
             doc_info['stage'] = 'analyzing'
             doc_info['progress'] = 60
 
-            # Extract and create entity relationships
+            # Extract and create entity relationships using semantic processor
             self.logger.info("Creating entity relationships...")
-            entities = self._extract_entities(file_content)
-            self._create_entity_nodes(doc_node, entities)
-            self.logger.info(f"Created {len(entities)} entity relationships")
+            semantic_analysis = self.semantic_processor.process_document(file_content)
+            self._create_entity_nodes(doc_node, semantic_analysis['entities'])
 
             # Final progress update
             doc_info['stage'] = 'complete'
@@ -86,7 +72,6 @@ class DocumentProcessor:
     def _extract_file_content(self, file) -> str:
         """Extract content from file based on file type"""
         try:
-            # Handle both file-like objects and our custom FileWrapper
             if hasattr(file, 'read'):
                 content = file.read()
                 content_str = content.decode('utf-8') if isinstance(content, bytes) else str(content)
@@ -107,60 +92,6 @@ class DocumentProcessor:
             self.logger.error(f"Error extracting file content: {str(e)}")
             raise ValueError(f"Could not read file content: {str(e)}")
 
-    def _extract_entities(self, content: str) -> List[Dict]:
-        """Extract domain-specific entities from content"""
-        try:
-            doc = self.nlp(content)
-            entities = []
-
-            # Extract named entities
-            for ent in doc.ents:
-                if ent.label_ == "PERSON":
-                    entities.append({
-                        'name': ent.text,
-                        'type': 'Player',
-                        'source': 'spacy_ner'
-                    })
-                else:
-                    entities.append({
-                        'name': ent.text,
-                        'type': ent.label_,
-                        'source': 'spacy_ner'
-                    })
-
-            # Extract domain-specific terms
-            domain_terms = {
-                'Skill': [
-                    'setting', 'passing', 'blocking', 'serving', 'attacking', 'digging',
-                    'defense', 'reception', 'court coverage', 'jump serve'
-                ],
-                'Drill': [
-                    'pepper', 'queen of the court', 'mini-game', 'scrimmage', 
-                    'target practice', 'blocking drill', 'defensive drill'
-                ],
-                'VisualElement': [
-                    'ball tracking', 'peripheral vision', 'trajectory prediction',
-                    'depth perception', 'pattern recognition', 'visual focus'
-                ]
-            }
-
-            # Extract domain-specific terms
-            for entity_type, terms in domain_terms.items():
-                for term in terms:
-                    if term.lower() in content.lower():
-                        entities.append({
-                            'name': term,
-                            'type': entity_type,
-                            'source': 'domain_terminology'
-                        })
-
-            self.logger.info(f"Extracted {len(entities)} entities from content")
-            return entities
-
-        except Exception as e:
-            self.logger.error(f"Error extracting entities: {str(e)}")
-            return []
-
     def _create_entity_nodes(self, doc_node, entities: List[Dict]) -> None:
         """Create entity nodes and link them to the document"""
         try:
@@ -170,7 +101,6 @@ class DocumentProcessor:
 
             for entity in entities:
                 try:
-                    # Create the entity and relationship to document
                     self.graph_service.create_entity_node(entity, doc_node)
                 except Exception as e:
                     self.logger.error(f"Error creating entity node: {str(e)}")
